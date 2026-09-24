@@ -42,6 +42,7 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user()
                     ? $request->user()->only(['coduser', 'nombre'])
                     : null,
+                'permisos' => $request->user()?->permisos() ?? [],
             ],
             'flash' => [
                 'alerta' => fn () => $request->session()->get('alerta'),

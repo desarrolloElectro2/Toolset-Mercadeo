@@ -6,6 +6,7 @@ export interface Usuario {
 export interface SharedProps {
     auth: {
         user: Usuario | null;
+        permisos: string[];
     };
     flash: {
         alerta: string | null;
