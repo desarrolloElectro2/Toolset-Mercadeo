@@ -116,6 +116,12 @@ export default function AppLayout({ titulo, icono = '⊞', children }: Props) {
                         <h2 className="text-base font-semibold text-slate-800">{titulo}</h2>
                     </div>
 
+                    {flash.mensaje && (
+                        <p className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                            {flash.mensaje}
+                        </p>
+                    )}
+
                     {flash.alerta && (
                         <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                             {flash.alerta}
