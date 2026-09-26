@@ -87,15 +87,22 @@ class PermisosTest extends TestCase
             ->assertForbidden();
     }
 
+    // El caso con permiso consulta la BD (lista real); se probará cuando exista la base de pruebas
     public function test_actividades_requiere_act_list(): void
     {
-        $this->actingAs($this->usuario(',act_list,'))
-            ->get('/actividades')
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page->component('Actividades/Index'));
-
         $this->actingAs($this->usuario(',usu_list,'))
             ->get('/actividades')
+            ->assertForbidden();
+    }
+
+    public function test_programacion_requiere_act_create(): void
+    {
+        $this->actingAs($this->usuario(',act_list,'))
+            ->get('/actividades/programacion/crear')
+            ->assertForbidden();
+
+        $this->actingAs($this->usuario(',act_list,'))
+            ->getJson('/actividades/datos/agencias?departamento_id=52')
             ->assertForbidden();
     }
 

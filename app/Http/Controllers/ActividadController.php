@@ -2,15 +2,41 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Actividad;
+use App\Services\ActividadService;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 // El controlador solo recibe la petición, llama al servicio y responde.
-// El ActividadService se agrega cuando se defina la tabla de actividades.
 class ActividadController extends Controller
 {
-    // Listado de actividades
-    public function index()
+    public function __construct(private ActividadService $actividadService)
     {
-        return Inertia::render('Actividades/Index');
+    }
+
+    // Lista de actividades con filtros y paginación
+    public function index(Request $request)
+    {
+        return Inertia::render('Actividades/Index', $this->actividadService->listar($request));
+    }
+
+    // Formulario de edición (o consulta si la actividad ya no es editable)
+    public function edit(Actividad $actividad)
+    {
+        return Inertia::render('Actividades/Edit', $this->actividadService->obtenerParaEditar($actividad));
+    }
+
+    // Guarda los cambios de lo planeado para el día
+    public function update(Request $request, Actividad $actividad)
+    {
+        try {
+            $this->actividadService->actualizar($request, $actividad);
+        } catch (\DomainException $e) {
+            return back()->with('alerta', $e->getMessage());
+        }
+
+        return redirect()
+            ->route('actividades.edit', $actividad)
+            ->with('mensaje', "Actividad #{$actividad->id} actualizada correctamente.");
     }
 }

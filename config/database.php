@@ -103,6 +103,37 @@ return [
             ]) : [],
         ],
 
+        // BD de interelec: solo lectura de sus asesores (tabla `vendedores`).
+        'toolset_inter' => [
+            'driver' => 'mysql',
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_PORT', '3306'),
+            'database' => env('DB_DATABASE_INTER', 'toolset_inter'),
+            'username' => env('DB_USERNAME_EXT'),
+            'password' => env('DB_PASSWORD_EXT'),
+            'unix_socket' => env('DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+            'engine' => null,
+        ],
+
+        // Manager ERP (PostgreSQL, esquema `electro`): solo lectura del inventario por bodega.
+        'mng' => [
+            'driver' => 'pgsql',
+            'host' => env('MNG_HOST'),
+            'port' => env('MNG_PORT', '5432'),
+            'database' => env('MNG_DATABASE', 'postgres'),
+            'username' => env('MNG_USERNAME'),
+            'password' => env('MNG_PASSWORD'),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => 'disable',
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DB_URL'),

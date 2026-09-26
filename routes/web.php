@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ConfiguracionController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\PerfilController;
+use App\Http\Controllers\ProgramacionActividadController;
 use App\Http\Controllers\UsuarioController;
 use Inertia\Inertia;
 
@@ -19,8 +20,26 @@ Route::middleware('auth')->group(function () {
     Route::get('/', fn () => Inertia::render('Home'))->name('home');
 
     // Actividades
-    Route::get('/actividades', [ActividadController::class, 'index'])
-        ->middleware('can:act_list')->name('actividades.index');
+    Route::prefix('actividades')->name('actividades.')->group(function () {
+        Route::get('/', [ActividadController::class, 'index'])
+            ->middleware('can:act_list')->name('index');
+
+        // Editar una actividad (un día); la misma pantalla sirve de consulta si ya no es editable
+        Route::get('/{actividad}/editar', [ActividadController::class, 'edit'])
+            ->whereNumber('actividad')->middleware('can:act_list')->name('edit');
+        Route::put('/{actividad}', [ActividadController::class, 'update'])
+            ->whereNumber('actividad')->middleware('can:act_edit')->name('update');
+
+        // Programación mensual
+        Route::middleware('can:act_create')->group(function () {
+            Route::get('/programacion/crear', [ProgramacionActividadController::class, 'create'])->name('programacion.create');
+            Route::post('/programacion', [ProgramacionActividadController::class, 'store'])->name('programacion.store');
+
+            // Datos para los selects dependientes (JSON)
+            Route::get('/datos/agencias', [ProgramacionActividadController::class, 'agencias'])->name('datos.agencias');
+            Route::get('/datos/agencia/{codagen}', [ProgramacionActividadController::class, 'datosAgencia'])->name('datos.agencia');
+        });
+    });
 
     Route::prefix('configuracion')->name('configuracion.')->group(function () {
         Route::get('/', [ConfiguracionController::class, 'index'])->name('index');
