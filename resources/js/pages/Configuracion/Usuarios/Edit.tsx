@@ -1,5 +1,6 @@
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { FormEvent, ReactNode } from 'react';
+import { IconoUsuarios } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 
 interface Props {
@@ -48,7 +49,7 @@ export default function Edit({ usuario, perfiles }: Props) {
     };
 
     return (
-        <AppLayout titulo="Configuración › Usuarios › Actualizar usuario" icono="👥">
+        <AppLayout titulo="Configuración › Usuarios › Actualizar usuario" icono={<IconoUsuarios />}>
             <Head title={`Editar ${usuario.coduser}`} />
 
             <form onSubmit={guardar} className="rounded-lg border border-slate-200 bg-white p-6">

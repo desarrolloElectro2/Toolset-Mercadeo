@@ -1,5 +1,6 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
+import { IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 
 interface Permiso {
@@ -48,7 +49,7 @@ export default function Edit({ rol, modulos }: Props) {
     };
 
     return (
-        <AppLayout titulo="Configuración › Perfiles › Actualizar perfil" icono="🔐">
+        <AppLayout titulo="Configuración › Perfiles › Actualizar perfil" icono={<IconoPerfiles />}>
             <Head title={`Editar ${rol.nombre}`} />
 
             <form onSubmit={guardar} className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">

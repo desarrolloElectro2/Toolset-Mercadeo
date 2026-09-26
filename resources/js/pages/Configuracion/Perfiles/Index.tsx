@@ -3,6 +3,7 @@ import { FormEvent, useState } from 'react';
 import ModalConfirmar from '@/components/ModalConfirmar';
 import Paginacion from '@/components/Paginacion';
 import { useCan } from '@/hooks/useCan';
+import { IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
 
@@ -47,7 +48,7 @@ export default function Index({ roles, filtros }: Props) {
     };
 
     return (
-        <AppLayout titulo="Configuración › Perfiles" icono="🔐">
+        <AppLayout titulo="Configuración › Perfiles" icono={<IconoPerfiles />}>
             <Head title="Perfiles" />
 
             <div className="rounded-lg border border-slate-200 bg-white p-6">

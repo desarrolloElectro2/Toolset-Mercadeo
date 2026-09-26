@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import { ReactNode, useState } from 'react';
+import { IconoPrincipal } from '@/components/Iconos';
 import { useCan } from '@/hooks/useCan';
 import { modulos, puedeVer } from '@/modulos';
 
@@ -15,11 +16,11 @@ function leerSidebarAbierto(): boolean {
 
 interface Props {
     titulo: string;
-    icono?: string;
+    icono?: ReactNode;
     children: ReactNode;
 }
 
-export default function AppLayout({ titulo, icono = '⊞', children }: Props) {
+export default function AppLayout({ titulo, icono = <IconoPrincipal />, children }: Props) {
     const { auth, flash } = usePage().props;
     const url = usePage().url;
     const can = useCan();
@@ -102,7 +103,7 @@ export default function AppLayout({ titulo, icono = '⊞', children }: Props) {
                                         : 'text-gray-700 hover:bg-gray-50'
                                 }`}
                             >
-                                <span className="shrink-0 text-[15px]">{item.icono}</span>
+                                <span className={`shrink-0 ${esActivo(item.href) ? '' : 'text-gray-400'}`}>{item.icono}</span>
                                 <span>{item.label}</span>
                             </Link>
                         ))}
@@ -112,7 +113,7 @@ export default function AppLayout({ titulo, icono = '⊞', children }: Props) {
                 {/* Contenido */}
                 <main className="flex-1 overflow-y-auto p-6">
                     <div className="mb-4 flex items-center gap-2 border-b border-slate-200 pb-3">
-                        <span className="text-base">{icono}</span>
+                        <span className="text-slate-500">{icono}</span>
                         <h2 className="text-base font-semibold text-slate-800">{titulo}</h2>
                     </div>
 

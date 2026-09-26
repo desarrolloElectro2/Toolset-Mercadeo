@@ -87,6 +87,18 @@ class PermisosTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_actividades_requiere_act_list(): void
+    {
+        $this->actingAs($this->usuario(',act_list,'))
+            ->get('/actividades')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->component('Actividades/Index'));
+
+        $this->actingAs($this->usuario(',usu_list,'))
+            ->get('/actividades')
+            ->assertForbidden();
+    }
+
     public function test_usuario_sin_nivel_mercadeo_es_expulsado(): void
     {
         $this->actingAs($this->usuario(',usu_list,', nivel: 0))

@@ -2,6 +2,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
 import Paginacion from '@/components/Paginacion';
 import { useCan } from '@/hooks/useCan';
+import { IconoUsuarios } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
 
@@ -33,7 +34,7 @@ export default function Index({ usuarios, filtros }: Props) {
     };
 
     return (
-        <AppLayout titulo="Configuración › Usuarios" icono="👥">
+        <AppLayout titulo="Configuración › Usuarios" icono={<IconoUsuarios />}>
             <Head title="Usuarios" />
 
             <div className="rounded-lg border border-slate-200 bg-white p-6">

@@ -1,10 +1,11 @@
 import { ReactNode } from 'react';
+import { IconoActividades, IconoConfiguracion, IconoPerfiles, IconoPrincipal, IconoUsuarios } from '@/components/Iconos';
 
 export interface ModuloMenu {
     label: string;
     href: string;
-    /** Emoji del menú lateral y del título de la página */
-    icono: string;
+    /** Ícono de línea (monocromático) del menú lateral y del título de la página */
+    icono: ReactNode;
     /** Ícono grande de la tarjeta (si no tiene, no aparece como tarjeta) */
     iconoTarjeta?: ReactNode;
     /** Código de la tabla permisos que da acceso; sin permiso = visible para todos */
@@ -41,18 +42,27 @@ const iconoConfiguracion = (
     </svg>
 );
 
+const iconoActividades = (
+    <svg viewBox="0 0 40 40" fill="none" width="40" height="40">
+        <rect x="7" y="10" width="26" height="23" rx="3" fill="#3b82f6" opacity="0.5" />
+        <path d="M13 7v6M27 7v6M7 17h26" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M14 25l3.5 3.5L26 21" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+);
+
 // Registro único de módulos: menú lateral y tarjetas salen de aquí.
 // Para agregar un módulo (o submódulo) nuevo basta con añadirlo a esta lista.
 export const modulos: ModuloMenu[] = [
-    { label: 'Principal', href: '/', icono: '⊞' },
+    { label: 'Principal', href: '/', icono: <IconoPrincipal /> },
+    { label: 'Actividades', href: '/actividades', icono: <IconoActividades />, permiso: 'act_list', iconoTarjeta: iconoActividades },
     {
         label: 'Configuración',
         href: '/configuracion',
-        icono: '⚙️',
+        icono: <IconoConfiguracion />,
         iconoTarjeta: iconoConfiguracion,
         submodulos: [
-            { label: 'Usuarios', href: '/configuracion/usuarios', icono: '👥', permiso: 'usu_list', iconoTarjeta: iconoUsuarios },
-            { label: 'Perfiles', href: '/configuracion/perfiles', icono: '🔐', permiso: 'rol_list', iconoTarjeta: iconoPerfiles },
+            { label: 'Usuarios', href: '/configuracion/usuarios', icono: <IconoUsuarios />, permiso: 'usu_list', iconoTarjeta: iconoUsuarios },
+            { label: 'Perfiles', href: '/configuracion/perfiles', icono: <IconoPerfiles />, permiso: 'rol_list', iconoTarjeta: iconoPerfiles },
         ],
     },
 ];

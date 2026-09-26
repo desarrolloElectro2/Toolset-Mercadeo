@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ActividadController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ConfiguracionController;
 use Illuminate\Support\Facades\Route;
@@ -16,6 +17,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
     Route::get('/', fn () => Inertia::render('Home'))->name('home');
+
+    // Actividades
+    Route::get('/actividades', [ActividadController::class, 'index'])
+        ->middleware('can:act_list')->name('actividades.index');
 
     Route::prefix('configuracion')->name('configuracion.')->group(function () {
         Route::get('/', [ConfiguracionController::class, 'index'])->name('index');

@@ -1,13 +1,16 @@
 import { Head, Link } from '@inertiajs/react';
+import { IconoAccesoDenegado, IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 
 export default function AccesoDenegado() {
     return (
-        <AppLayout titulo="Acceso denegado" icono="🚫">
+        <AppLayout titulo="Acceso denegado" icono={<IconoAccesoDenegado />}>
             <Head title="Acceso denegado" />
 
             <div className="flex min-h-[300px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white p-10 text-center">
-                <div className="mb-4 text-5xl opacity-30">🔒</div>
+                <div className="mb-4 text-slate-300">
+                    <IconoPerfiles tamano={48} />
+                </div>
                 <p className="text-sm font-medium text-slate-500">Tu rol no tiene permiso para ver esta sección.</p>
                 <Link
                     href="/"

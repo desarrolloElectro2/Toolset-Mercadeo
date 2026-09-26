@@ -1,7 +1,9 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
 
-const BG = 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1600&h=900&fit=crop&auto=format';
+const PORTAL_URL = 'https://mitoolset.ddns.net:223/portal/index.php';
+
+const BG ='https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1600&h=900&fit=crop&auto=format';
 
 const inputClass =
     'w-full rounded-lg border-[1.5px] border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 outline-none transition-all duration-150 focus:border-red-500 focus:ring-3 focus:ring-red-500/12';
@@ -110,20 +112,34 @@ export default function Login() {
                                 {errors.contrasena && <p className="mt-1 text-xs text-red-600">{errors.contrasena}</p>}
                             </div>
 
-                            <button
-                                type="submit"
-                                disabled={processing}
-                                className="mt-2 w-full cursor-pointer rounded-lg bg-red-600 py-3 text-sm font-semibold tracking-wide text-white shadow-[0_4px_14px_rgba(220,38,38,0.3)] transition-all duration-200 hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
-                            >
-                                {processing ? (
-                                    <span className="flex items-center justify-center gap-2">
-                                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                        Ingresando…
-                                    </span>
-                                ) : (
-                                    'INGRESAR'
-                                )}
-                            </button>
+                            <div className="mt-2 flex gap-3">
+                                <button
+                                    type="submit"
+                                    disabled={processing}
+                                    className="flex-1 cursor-pointer rounded-lg bg-red-600 py-3 text-sm font-semibold tracking-wide text-white shadow-[0_4px_14px_rgba(220,38,38,0.3)] transition-all duration-200 hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300 disabled:shadow-none"
+                                >
+                                    {processing ? (
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                            Ingresando…
+                                        </span>
+                                    ) : (
+                                        'INGRESAR'
+                                    )}
+                                </button>
+
+                                {/* Enlace externo al portal Toolset: <a> normal, no Link de Inertia */}
+                                <a
+                                    href={PORTAL_URL}
+                                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gray-900 py-3 text-sm font-semibold tracking-wide text-white shadow-[0_4px_14px_rgba(17,24,39,0.25)] transition-all duration-200 hover:bg-gray-800"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="19" y1="12" x2="5" y2="12" />
+                                        <polyline points="12 19 5 12 12 5" />
+                                    </svg>
+                                    REGRESAR
+                                </a>
+                            </div>
                         </form>
                     </div>
                 </div>
