@@ -1,6 +1,7 @@
 import { Head, Link } from '@inertiajs/react';
 import { IconoAccesoDenegado, IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
+import { url } from '@/lib/url';
 
 export default function AccesoDenegado() {
     return (
@@ -13,7 +14,7 @@ export default function AccesoDenegado() {
                 </div>
                 <p className="text-sm font-medium text-slate-500">Tu rol no tiene permiso para ver esta sección.</p>
                 <Link
-                    href="/"
+                    href={url('/')}
                     className="mt-6 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                 >
                     Volver a Principal

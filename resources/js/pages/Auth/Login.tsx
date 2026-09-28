@@ -1,5 +1,6 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
+import { url } from '@/lib/url';
 
 const PORTAL_URL = 'https://mitoolset.ddns.net:223/portal/index.php';
 
@@ -18,7 +19,7 @@ export default function Login() {
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
-        post('/login', {
+        post(url('/login'), {
             onFinish: () => setData('contrasena', ''),
         });
     };

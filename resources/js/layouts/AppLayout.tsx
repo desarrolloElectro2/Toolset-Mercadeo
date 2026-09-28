@@ -3,6 +3,7 @@ import { ReactNode, useState } from 'react';
 import { IconoPrincipal } from '@/components/Iconos';
 import { useCan } from '@/hooks/useCan';
 import { modulos, puedeVer } from '@/modulos';
+import { rutaSinBase, url } from '@/lib/url';
 
 const CLAVE_SIDEBAR = 'mercadeo.sidebarAbierto';
 
@@ -22,14 +23,13 @@ interface Props {
 
 export default function AppLayout({ titulo, icono = <IconoPrincipal />, children }: Props) {
     const { auth, flash } = usePage().props;
-    const url = usePage().url;
     const can = useCan();
     const [sidebarAbierto, setSidebarAbierto] = useState(leerSidebarAbierto);
 
     const items = modulos.filter((m) => puedeVer(m, can));
     const nombre = auth.user?.nombre ?? auth.user?.coduser ?? '';
 
-    const ruta = url.split('?')[0];
+    const ruta = rutaSinBase(usePage().url);
     const esActivo = (href: string) => (href === '/' ? ruta === '/' : ruta === href || ruta.startsWith(`${href}/`));
 
     const alternarSidebar = () => {
@@ -70,7 +70,7 @@ export default function AppLayout({ titulo, icono = <IconoPrincipal />, children
                         {nombre.charAt(0).toUpperCase()}
                     </div>
                     <Link
-                        href="/logout"
+                        href={url('/logout')}
                         method="post"
                         as="button"
                         className="ml-1 cursor-pointer text-gray-400 transition-colors hover:text-red-400"
@@ -96,7 +96,7 @@ export default function AppLayout({ titulo, icono = <IconoPrincipal />, children
                         {items.map((item) => (
                             <Link
                                 key={item.href}
-                                href={item.href}
+                                href={url(item.href)}
                                 className={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px] whitespace-nowrap transition-colors ${
                                     esActivo(item.href)
                                         ? 'bg-blue-50 font-semibold text-blue-600'

@@ -9,6 +9,7 @@ import SelectBuscable from '@/components/SelectBuscable';
 import { useCan } from '@/hooks/useCan';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
+import { url } from '@/lib/url';
 
 interface ActividadFila {
     id: number;
@@ -60,7 +61,7 @@ export default function Index({ actividades, filtros, opciones }: Props) {
         const nuevos = { ...filtros, buscar, ...cambios };
         // Solo viajan los filtros con valor (el mes siempre, para distinguir "mes actual" de "todos")
         const params = Object.fromEntries(Object.entries(nuevos).filter(([clave, valor]) => valor !== '' || clave === 'mes'));
-        router.get('/actividades', params, { preserveState: true, replace: true });
+        router.get(url('/actividades'), params, { preserveState: true, replace: true });
     };
 
     const buscarTexto = (e: FormEvent) => {
@@ -176,7 +177,7 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                                         </td>
                                         <td className="py-3 text-right">
                                             <Link
-                                                href={`/actividades/${a.id}/editar`}
+                                                href={url(`/actividades/${a.id}/editar`)}
                                                 className={
                                                     puedeEditar
                                                         ? `${botonAccion} border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100`
@@ -212,7 +213,7 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                         <p className="text-sm text-slate-400">No hay actividades con estos filtros.</p>
                         {can('act_create') && (
                             <Link
-                                href="/actividades/programacion/crear"
+                                href={url('/actividades/programacion/crear')}
                                 className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                             >
                                 Nueva programación

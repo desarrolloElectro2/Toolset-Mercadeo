@@ -6,6 +6,7 @@ import { useCan } from '@/hooks/useCan';
 import { IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
+import { url } from '@/lib/url';
 
 interface PerfilFila {
     id: number;
@@ -31,13 +32,13 @@ export default function Index({ roles, filtros }: Props) {
 
     const buscarPerfiles = (e: FormEvent) => {
         e.preventDefault();
-        router.get('/configuracion/perfiles', buscar ? { buscar } : {}, { preserveState: true, replace: true });
+        router.get(url('/configuracion/perfiles'), buscar ? { buscar } : {}, { preserveState: true, replace: true });
     };
 
     const confirmarEliminar = () => {
         if (!porEliminar) return;
 
-        router.delete(`/configuracion/perfiles/${porEliminar.id}`, {
+        router.delete(url(`/configuracion/perfiles/${porEliminar.id}`), {
             preserveScroll: true,
             onStart: () => setEliminando(true),
             onFinish: () => {
@@ -89,7 +90,7 @@ export default function Index({ roles, filtros }: Props) {
                                             <div className="flex justify-end gap-2">
                                                 {can('rol_edit') && (
                                                     <Link
-                                                        href={`/configuracion/perfiles/${rol.id}/edit`}
+                                                        href={url(`/configuracion/perfiles/${rol.id}/edit`)}
                                                         className={`${botonAccion} border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100 focus-visible:ring-blue-300`}
                                                     >
                                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

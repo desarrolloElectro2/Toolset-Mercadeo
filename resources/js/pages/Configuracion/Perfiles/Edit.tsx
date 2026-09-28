@@ -2,6 +2,7 @@ import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
 import { IconoPerfiles } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
+import { url } from '@/lib/url';
 
 interface Permiso {
     id: number;
@@ -45,7 +46,7 @@ export default function Edit({ rol, modulos }: Props) {
 
     const guardar = (e: FormEvent) => {
         e.preventDefault();
-        put(`/configuracion/perfiles/${rol.id}`);
+        put(url(`/configuracion/perfiles/${rol.id}`));
     };
 
     return (
@@ -145,7 +146,7 @@ export default function Edit({ rol, modulos }: Props) {
 
                 <div className="flex justify-end gap-2">
                     <Link
-                        href="/configuracion/perfiles"
+                        href={url('/configuracion/perfiles')}
                         className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300"
                     >
                         Cancelar

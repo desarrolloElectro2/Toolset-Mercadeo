@@ -3,6 +3,7 @@ import { FormEvent } from 'react';
 import Campo, { inputClass } from '@/components/Campo';
 import { IconoUsuarios } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
+import { url } from '@/lib/url';
 
 interface Props {
     usuario: {
@@ -31,7 +32,7 @@ export default function Edit({ usuario, perfiles }: Props) {
 
     const guardar = (e: FormEvent) => {
         e.preventDefault();
-        put(`/configuracion/usuarios/${encodeURIComponent(usuario.coduser)}`);
+        put(url(`/configuracion/usuarios/${encodeURIComponent(usuario.coduser)}`));
     };
 
     return (
@@ -103,7 +104,7 @@ export default function Edit({ usuario, perfiles }: Props) {
                         {processing ? 'Actualizando…' : 'Actualizar'}
                     </button>
                     <Link
-                        href="/configuracion/usuarios"
+                        href={url('/configuracion/usuarios')}
                         className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300"
                     >
                         Regresar

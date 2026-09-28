@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import { useCan } from '@/hooks/useCan';
 import { ModuloMenu, puedeVer } from '@/modulos';
+import { url } from '@/lib/url';
 
 /** Cuadrícula de tarjetas azules (Principal y páginas de módulos con submódulos). */
 export default function TarjetasModulos({ modulos }: { modulos: ModuloMenu[] }) {
@@ -16,7 +17,7 @@ export default function TarjetasModulos({ modulos }: { modulos: ModuloMenu[] }) 
                     {tarjetas.map((tarjeta) => (
                         <Link
                             key={tarjeta.href}
-                            href={tarjeta.href}
+                            href={url(tarjeta.href)}
                             className="flex items-center gap-4 rounded-lg border border-blue-200 bg-blue-50 p-5 text-left transition-all duration-150 hover:border-blue-300 hover:bg-blue-100"
                         >
                             <div className="shrink-0">{tarjeta.iconoTarjeta}</div>

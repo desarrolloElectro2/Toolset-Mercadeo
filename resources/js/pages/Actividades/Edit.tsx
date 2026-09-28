@@ -10,6 +10,7 @@ import SelectBuscable from '@/components/SelectBuscable';
 import { useCan } from '@/hooks/useCan';
 import AppLayout from '@/layouts/AppLayout';
 import { DetalleDia, Item, ProductoInventario } from '@/types/actividades';
+import { url } from '@/lib/url';
 
 interface Props {
     actividad: DetalleDia & {
@@ -65,7 +66,7 @@ export default function Edit({ actividad, programacion, editable, tipos, checkli
 
     const guardar = (e: FormEvent) => {
         e.preventDefault();
-        put(`/actividades/${actividad.id}`, { preserveScroll: true });
+        put(url(`/actividades/${actividad.id}`), { preserveScroll: true });
     };
 
     return (
@@ -137,7 +138,7 @@ export default function Edit({ actividad, programacion, editable, tipos, checkli
                 </Seccion>
 
                 <div className="flex justify-end gap-2">
-                    <Link href="/actividades" className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300">
+                    <Link href={url('/actividades')} className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300">
                         Regresar
                     </Link>
                     {!soloLectura && (

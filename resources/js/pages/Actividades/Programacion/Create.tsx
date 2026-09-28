@@ -8,6 +8,7 @@ import DetalleActividad from '@/components/actividades/DetalleActividad';
 import SelectBuscable from '@/components/SelectBuscable';
 import AppLayout from '@/layouts/AppLayout';
 import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
+import { url } from '@/lib/url';
 
 interface DatosAgencia {
     regional: string;
@@ -111,7 +112,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
         if (!id) return;
 
         setCargando('agencias');
-        obtenerJson<{ codigo: string; nombre: string }[]>(`/actividades/datos/agencias?departamento_id=${id}`)
+        obtenerJson<{ codigo: string; nombre: string }[]>(url(`/actividades/datos/agencias?departamento_id=${id}`))
             .then(setAgencias)
             .catch(() => setErrorCarga('No se pudieron cargar las agencias. Intente de nuevo.'))
             .finally(() => setCargando(null));
@@ -131,7 +132,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
         if (!codigo) return;
 
         setCargando('agencia');
-        obtenerJson<DatosAgencia>(`/actividades/datos/agencia/${encodeURIComponent(codigo)}`)
+        obtenerJson<DatosAgencia>(url(`/actividades/datos/agencia/${encodeURIComponent(codigo)}`))
             .then((datos) => {
                 if (agenciaSolicitada.current !== codigo) return; // llegó la respuesta de una agencia anterior
                 setDatosAgencia(datos);
@@ -175,7 +176,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
             })),
         }));
 
-        post('/actividades/programacion', { preserveScroll: true });
+        post(url('/actividades/programacion'), { preserveScroll: true });
     };
 
     const hayErrores = Object.keys(errores).length > 0;
@@ -302,7 +303,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                 </Seccion>
 
                 <div className="flex justify-end gap-2">
-                    <Link href="/actividades" className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300">
+                    <Link href={url('/actividades')} className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300">
                         Cancelar
                     </Link>
                     <button

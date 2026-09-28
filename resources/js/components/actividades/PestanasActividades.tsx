@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import { useCan } from '@/hooks/useCan';
+import { rutaSinBase, url } from '@/lib/url';
 
 const pestanas = [
     { label: 'Programación', href: '/actividades/programacion/crear', permiso: 'act_create' },
@@ -9,7 +10,7 @@ const pestanas = [
 /** Pestañas del módulo Actividades (Programación / Lista / Calendario). */
 export default function PestanasActividades() {
     const can = useCan();
-    const ruta = usePage().url.split('?')[0];
+    const ruta = rutaSinBase(usePage().url);
 
     return (
         <nav className="mb-4 flex flex-wrap gap-2">
@@ -18,7 +19,7 @@ export default function PestanasActividades() {
                 .map((p) => (
                     <Link
                         key={p.href}
-                        href={p.href}
+                        href={url(p.href)}
                         className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
                             ruta === p.href
                                 ? 'bg-blue-600 text-white shadow-sm'

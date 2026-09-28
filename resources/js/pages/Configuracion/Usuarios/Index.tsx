@@ -5,6 +5,7 @@ import { useCan } from '@/hooks/useCan';
 import { IconoUsuarios } from '@/components/Iconos';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
+import { url } from '@/lib/url';
 
 interface UsuarioFila {
     coduser: string;
@@ -30,7 +31,7 @@ export default function Index({ usuarios, filtros }: Props) {
         const params: Record<string, string> = {};
         if (buscar) params.buscar = buscar;
         if (nuevoPerfil) params.perfil = nuevoPerfil;
-        router.get('/configuracion/usuarios', params, { preserveState: true, replace: true });
+        router.get(url('/configuracion/usuarios'), params, { preserveState: true, replace: true });
     };
 
     return (
@@ -101,7 +102,7 @@ export default function Index({ usuarios, filtros }: Props) {
                                     <td className="py-3 text-right">
                                         {can('usu_edit') && (
                                             <Link
-                                                href={`/configuracion/usuarios/${encodeURIComponent(u.coduser)}/edit`}
+                                                href={url(`/configuracion/usuarios/${encodeURIComponent(u.coduser)}/edit`)}
                                                 className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm transition-all duration-150 hover:border-blue-300 hover:bg-blue-100"
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
