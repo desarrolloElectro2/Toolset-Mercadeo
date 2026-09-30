@@ -3,9 +3,11 @@
 use App\Http\Controllers\ActividadController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ConfiguracionController;
+use App\Http\Controllers\EjecucionActividadController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\ProgramacionActividadController;
+use App\Http\Controllers\TipoActividadController;
 use App\Http\Controllers\UsuarioController;
 use Inertia\Inertia;
 
@@ -24,11 +26,27 @@ Route::middleware('auth')->group(function () {
         Route::get('/', [ActividadController::class, 'index'])
             ->middleware('can:act_list')->name('index');
 
+        // Calendario (la página y los eventos del rango visible en JSON)
+        Route::get('/calendario', [ActividadController::class, 'calendario'])
+            ->middleware('can:act_list')->name('calendario');
+        Route::get('/calendario/eventos', [ActividadController::class, 'eventos'])
+            ->middleware('can:act_list')->name('calendario.eventos');
+
         // Editar una actividad (un día); la misma pantalla sirve de consulta si ya no es editable
         Route::get('/{actividad}/editar', [ActividadController::class, 'edit'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('edit');
         Route::put('/{actividad}', [ActividadController::class, 'update'])
             ->whereNumber('actividad')->middleware('can:act_edit')->name('update');
+
+        // Ejecución: iniciar (hora + foto), finalizar (hora fin), anular (motivo) y ver la foto
+        Route::post('/{actividad}/iniciar', [EjecucionActividadController::class, 'iniciar'])
+            ->whereNumber('actividad')->middleware('can:act_edit')->name('iniciar');
+        Route::post('/{actividad}/finalizar', [EjecucionActividadController::class, 'finalizar'])
+            ->whereNumber('actividad')->middleware('can:act_edit')->name('finalizar');
+        Route::post('/{actividad}/anular', [EjecucionActividadController::class, 'anular'])
+            ->whereNumber('actividad')->middleware('can:act_anular')->name('anular');
+        Route::get('/{actividad}/foto-inicio', [EjecucionActividadController::class, 'foto'])
+            ->whereNumber('actividad')->middleware('can:act_list')->name('foto');
 
         // Programación mensual
         Route::middleware('can:act_create')->group(function () {
@@ -38,6 +56,7 @@ Route::middleware('auth')->group(function () {
             // Datos para los selects dependientes (JSON)
             Route::get('/datos/agencias', [ProgramacionActividadController::class, 'agencias'])->name('datos.agencias');
             Route::get('/datos/agencia/{codagen}', [ProgramacionActividadController::class, 'datosAgencia'])->name('datos.agencia');
+            Route::get('/datos/programacion', [ProgramacionActividadController::class, 'programacionExistente'])->name('datos.programacion');
         });
     });
 
@@ -66,5 +85,13 @@ Route::middleware('auth')->group(function () {
 
         Route::put('/usuarios/{usuario}', [UsuarioController::class, 'update'])
             ->middleware('can:usu_edit')->name('usuarios.update');
+
+        // Tipos de actividad (matriz parametrizable): un solo permiso para entrar y hacer todo el CRUD
+        Route::middleware('can:tip_actividad')->group(function () {
+            Route::get('/tipos-actividad', [TipoActividadController::class, 'index'])->name('tipos.index');
+            Route::post('/tipos-actividad', [TipoActividadController::class, 'store'])->name('tipos.store');
+            Route::put('/tipos-actividad/{tipo}', [TipoActividadController::class, 'update'])->whereNumber('tipo')->name('tipos.update');
+            Route::delete('/tipos-actividad/{tipo}', [TipoActividadController::class, 'destroy'])->whereNumber('tipo')->name('tipos.destroy');
+        });
     });
 });

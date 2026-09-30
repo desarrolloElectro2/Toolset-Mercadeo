@@ -41,7 +41,7 @@ export default function Login() {
             </div>
 
             {/* Tarjeta */}
-            <div className="-mt-8 flex flex-1 items-start justify-center px-4 pb-12">
+            <div className="mt-12 flex flex-1 items-start justify-center px-4 pb-12">
                 <div className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
                     <div className="h-1.5 w-full bg-[linear-gradient(90deg,#dc2626_0%,#ef4444_50%,#f87171_100%)]" />
 

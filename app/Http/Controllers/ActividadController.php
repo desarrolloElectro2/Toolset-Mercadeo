@@ -20,6 +20,18 @@ class ActividadController extends Controller
         return Inertia::render('Actividades/Index', $this->actividadService->listar($request));
     }
 
+    // Calendario de actividades
+    public function calendario()
+    {
+        return Inertia::render('Actividades/Calendario', $this->actividadService->datosCalendario());
+    }
+
+    // JSON: actividades del rango visible del calendario
+    public function eventos(Request $request)
+    {
+        return response()->json($this->actividadService->eventosCalendario($request));
+    }
+
     // Formulario de edición (o consulta si la actividad ya no es editable)
     public function edit(Actividad $actividad)
     {

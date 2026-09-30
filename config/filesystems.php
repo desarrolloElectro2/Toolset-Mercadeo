@@ -47,6 +47,14 @@ return [
             'report' => false,
         ],
 
+        // Disco del servidor donde se guardan los archivos de este proyecto
+        'samba' => [
+            'driver' => 'local',
+            'root' => env('DISCO_4TB_PATH', storage_path('app/samba')),
+            'throw' => true,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

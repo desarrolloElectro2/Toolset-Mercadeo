@@ -5,6 +5,7 @@ import { rutaSinBase, url } from '@/lib/url';
 const pestanas = [
     { label: 'Programación', href: '/actividades/programacion/crear', permiso: 'act_create' },
     { label: 'Lista actividades', href: '/actividades', permiso: 'act_list' },
+    { label: 'Calendario', href: '/actividades/calendario', permiso: 'act_list' },
 ];
 
 /** Pestañas del módulo Actividades (Programación / Lista / Calendario). */

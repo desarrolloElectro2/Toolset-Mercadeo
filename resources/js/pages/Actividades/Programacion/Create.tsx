@@ -1,14 +1,14 @@
 import { Head, Link, useForm } from '@inertiajs/react';
-import { FormEvent, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import DetalleActividad from '@/components/actividades/DetalleActividad';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
 import Campo, { inputClass } from '@/components/Campo';
 import { IconoActividades } from '@/components/Iconos';
 import Seccion from '@/components/Seccion';
-import DetalleActividad from '@/components/actividades/DetalleActividad';
 import SelectBuscable from '@/components/SelectBuscable';
 import AppLayout from '@/layouts/AppLayout';
-import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
 import { url } from '@/lib/url';
+import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
 
 interface DatosAgencia {
     regional: string;
@@ -18,10 +18,25 @@ interface DatosAgencia {
     inventarioError: string | null;
 }
 
-interface Dia extends DetalleDia {
+interface ActividadForm extends DetalleDia {
     fecha: string;
     actividad_tipo_id: string;
     ciudad_id: string;
+}
+
+interface AgenciaOpcion {
+    codigo: string;
+    nombre: string;
+    regional: string;
+}
+
+// Programación que la agencia ya tiene en el mes: las actividades nuevas se suman a ella
+interface ProgramacionExistente {
+    id: number;
+    coorNacional: Persona;
+    coorRegional: Persona;
+    responsable: Persona;
+    fechas: { fecha: string; id: number }[];
 }
 
 interface Props {
@@ -31,6 +46,8 @@ interface Props {
     asesores: Item[];
     coordinadoresNacionales: Persona[];
     responsables: Persona[];
+    /** Al llegar desde una actividad ("Agregar actividad a esta programación") */
+    inicial: { departamento_id: string; agencia_id: string; mes: string } | null;
 }
 
 const MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
@@ -45,86 +62,135 @@ function mesesDisponibles() {
     });
 }
 
-// Todos los días del mes, vacíos
-function generarDias(mes: string): Dia[] {
+// Primer y último día del mes ("YYYY-MM"), para limitar el selector de fecha
+function limitesMes(mes: string): { min: string; max: string } {
     const [anio, numeroMes] = mes.split('-').map(Number);
-    const totalDias = new Date(anio, numeroMes, 0).getDate();
-
-    return Array.from({ length: totalDias }, (_, i) => ({
-        fecha: `${mes}-${String(i + 1).padStart(2, '0')}`,
-        actividad_tipo_id: '',
-        ciudad_id: '',
-        productos: [],
-        asesores: [],
-        checklist: [],
-    }));
+    const ultimoDia = new Date(anio, numeroMes, 0).getDate();
+    return { min: `${mes}-01`, max: `${mes}-${String(ultimoDia).padStart(2, '0')}` };
 }
 
-const diaVacio = { actividad_tipo_id: '', ciudad_id: '', productos: [], asesores: [], checklist: [] };
+// "2026-10-02" -> ["02/10/2026", "viernes"] (fecha local para evitar el corrimiento por zona horaria)
+function formatearFecha(fecha: string): [string, string] {
+    const [anio, mes, dia] = fecha.split('-').map(Number);
+    const diaSemana = new Date(anio, mes - 1, dia).toLocaleDateString('es-CO', { weekday: 'long' });
+    return [`${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`, diaSemana];
+}
 
-// Un día se envía si el usuario diligenció cualquier dato
-const tieneDatos = (d: Dia) =>
-    d.actividad_tipo_id !== '' || d.ciudad_id !== '' || d.productos.length > 0 || d.asesores.length > 0 || d.checklist.length > 0;
-
-async function obtenerJson<T>(url: string): Promise<T> {
-    const respuesta = await fetch(url, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+async function obtenerJson<T>(ruta: string): Promise<T> {
+    const respuesta = await fetch(ruta, { headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
     if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
     return respuesta.json();
 }
 
-export default function Create({ departamentos, tipos, checklist, asesores, coordinadoresNacionales, responsables }: Props) {
+export default function Create({ departamentos, tipos, checklist, asesores, coordinadoresNacionales, responsables, inicial }: Props) {
     const meses = useMemo(mesesDisponibles, []);
     const { data, setData, post, processing, errors, transform } = useForm({
         departamento_id: '',
+        regional: '',
         agencia_id: '',
-        mes: meses[0].valor,
+        mes: inicial?.mes ?? meses[0].valor,
         coor_nacional_id: '',
         coor_regional_id: '',
         responsable_id: '',
-        dias: generarDias(meses[0].valor),
+        actividades: [] as ActividadForm[],
     });
     const errores = errors as Record<string, string>;
 
-    const [agencias, setAgencias] = useState<{ codigo: string; nombre: string }[]>([]);
+    const [agencias, setAgencias] = useState<AgenciaOpcion[]>([]);
+    // Regionales que tienen agencias en el departamento, y las agencias de la regional elegida
+    const regionales = useMemo(() => [...new Set(agencias.map((a) => a.regional))].sort(), [agencias]);
+    const agenciasDeRegional = agencias.filter((a) => a.regional === data.regional);
     const [datosAgencia, setDatosAgencia] = useState<DatosAgencia | null>(null);
     const [cargando, setCargando] = useState<'agencias' | 'agencia' | null>(null);
     const [errorCarga, setErrorCarga] = useState<string | null>(null);
     const agenciaSolicitada = useRef('');
 
-    // Posición de cada día dentro de lo que se envía (para ubicar los errores "actividades.N.campo")
-    const indiceEnvio = useMemo(() => {
-        let k = 0;
-        return data.dias.map((d) => (tieneDatos(d) ? k++ : -1));
-    }, [data.dias]);
-    const diasConActividad = indiceEnvio.filter((i) => i >= 0).length;
+    // Programación existente de la agencia en el mes (modo "agregar actividades")
+    const [existente, setExistente] = useState<ProgramacionExistente | null>(null);
+    const consultaExistente = useRef('');
+    const etiquetaMes = meses.find((m) => m.valor === data.mes)?.etiqueta ?? data.mes;
+    const nombreAgencia = agencias.find((a) => a.codigo === data.agencia_id)?.nombre ?? '';
+
+    const consultarExistente = (agencia: string, mes: string) => {
+        setExistente(null);
+        const clave = `${agencia}|${mes}`;
+        consultaExistente.current = clave;
+        if (!agencia) return;
+
+        obtenerJson<{ programacion: ProgramacionExistente | null }>(url(`/actividades/datos/programacion?agencia=${encodeURIComponent(agencia)}&mes=${mes}`))
+            .then((respuesta) => {
+                if (consultaExistente.current !== clave) return; // respuesta de una consulta anterior
+                // Solo cuenta como existente si trae sus fechas (nunca un objeto vacío)
+                const programacion = respuesta?.programacion && Array.isArray(respuesta.programacion.fechas) ? respuesta.programacion : null;
+                setExistente(programacion);
+                if (programacion) {
+                    // Se conservan los responsables de la programación existente
+                    setData((prev) => ({
+                        ...prev,
+                        coor_nacional_id: programacion.coorNacional.coduser,
+                        coor_regional_id: programacion.coorRegional.coduser,
+                        responsable_id: programacion.responsable.coduser,
+                    }));
+                }
+            })
+            .catch(() => setErrorCarga('No se pudo verificar si la agencia ya tiene programación en el mes.'));
+    };
+
+    // Fila para agregar una actividad: fecha + tipo
+    const [nuevaFecha, setNuevaFecha] = useState('');
+    const [nuevoTipo, setNuevoTipo] = useState('');
+    const [errorNueva, setErrorNueva] = useState<string | null>(null);
+    const limites = limitesMes(data.mes);
 
     const cambiarDepartamento = (id: string) => {
         setData((prev) => ({
             ...prev,
             departamento_id: id,
+            regional: '',
             agencia_id: '',
             coor_regional_id: '',
-            dias: prev.dias.map((d) => ({ ...d, ciudad_id: '', productos: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [] })),
         }));
         setAgencias([]);
         setDatosAgencia(null);
         setErrorCarga(null);
-        if (!id) return;
+        consultarExistente('', data.mes);
+        if (!id) return Promise.resolve([] as AgenciaOpcion[]);
 
         setCargando('agencias');
-        obtenerJson<{ codigo: string; nombre: string }[]>(url(`/actividades/datos/agencias?departamento_id=${id}`))
-            .then(setAgencias)
-            .catch(() => setErrorCarga('No se pudieron cargar las agencias. Intente de nuevo.'))
+        return obtenerJson<AgenciaOpcion[]>(url(`/actividades/datos/agencias?departamento_id=${id}`))
+            .then((lista) => {
+                setAgencias(lista);
+                // Si el departamento tiene una sola regional, se selecciona sola
+                const unicas = [...new Set(lista.map((a) => a.regional))];
+                if (unicas.length === 1) setData((prev) => ({ ...prev, regional: unicas[0] }));
+                return lista;
+            })
+            .catch(() => {
+                setErrorCarga('No se pudieron cargar las agencias. Intente de nuevo.');
+                return [] as AgenciaOpcion[];
+            })
             .finally(() => setCargando(null));
     };
 
-    const cambiarAgencia = (codigo: string) => {
+    // Otra regional: si la agencia elegida no es de esa regional, se quita
+    const cambiarRegional = (regional: string) => {
+        setData((prev) => ({ ...prev, regional }));
+        const agenciaActual = agencias.find((a) => a.codigo === data.agencia_id);
+        if (agenciaActual && agenciaActual.regional !== regional) {
+            cambiarAgencia('');
+        }
+    };
+
+    // mes: se pasa explícito cuando se llama antes de que data.mes se actualice (carga inicial)
+    const cambiarAgencia = (codigo: string, mes: string = data.mes) => {
+        consultarExistente(codigo, mes);
         // Otra agencia = otro inventario: se quitan los productos ya elegidos
         setData((prev) => ({
             ...prev,
             agencia_id: codigo,
             coor_regional_id: '',
-            dias: prev.dias.map((d) => ({ ...d, productos: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, productos: [] })),
         }));
         setDatosAgencia(null);
         setErrorCarga(null);
@@ -145,34 +211,89 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
     };
 
     const cambiarMes = (mes: string) => {
-        if (diasConActividad > 0 && !window.confirm('Al cambiar el mes se borran los días diligenciados. ¿Desea continuar?')) {
+        if (data.actividades.length > 0 && !window.confirm('Al cambiar el mes se quitan las actividades agregadas. ¿Desea continuar?')) {
             return;
         }
-        setData((prev) => ({ ...prev, mes, dias: generarDias(mes) }));
+        setData((prev) => ({ ...prev, mes, actividades: [] }));
+        setNuevaFecha('');
+        setErrorNueva(null);
+        consultarExistente(data.agencia_id, mes);
     };
 
-    const actualizarDia = (i: number, cambios: Partial<Dia>) => {
-        setData((prev) => ({ ...prev, dias: prev.dias.map((d, j) => (j === i ? { ...d, ...cambios } : d)) }));
+    // Llegando desde una actividad: se cargan su departamento, agencia y mes
+    useEffect(() => {
+        if (!inicial) return;
+        cambiarDepartamento(inicial.departamento_id).then((lista) => {
+            const agencia = lista.find((a) => a.codigo === inicial.agencia_id);
+            if (agencia) setData((prev) => ({ ...prev, regional: agencia.regional }));
+            cambiarAgencia(inicial.agencia_id, inicial.mes);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir la página
+    }, []);
+
+    const agregarActividad = () => {
+        if (!nuevaFecha || !nuevoTipo) {
+            setErrorNueva('Escriba la fecha y seleccione el tipo de actividad.');
+            return;
+        }
+        if (nuevaFecha < limites.min || nuevaFecha > limites.max) {
+            setErrorNueva('La fecha debe estar dentro del mes seleccionado.');
+            return;
+        }
+        if (data.actividades.some((a) => a.fecha === nuevaFecha)) {
+            setErrorNueva('Ya hay una actividad agregada para esa fecha.');
+            return;
+        }
+        const ocupada = existente?.fechas.find((f) => f.fecha === nuevaFecha);
+        if (ocupada) {
+            setErrorNueva(`Ya existe la actividad #${ocupada.id} en esa fecha para esta agencia.`);
+            return;
+        }
+
+        const nueva: ActividadForm = { fecha: nuevaFecha, actividad_tipo_id: nuevoTipo, ciudad_id: '', productos: [], asesores: [], checklist: [] };
+        setData((prev) => ({
+            ...prev,
+            actividades: [...prev.actividades, nueva].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+        }));
+        setNuevaFecha('');
+        setErrorNueva(null);
+    };
+
+    // Enter en la fila de agregar agrega la actividad en vez de enviar el formulario
+    const agregarConEnter = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            agregarActividad();
+        }
+    };
+
+    const actualizarActividad = (fecha: string, cambios: Partial<ActividadForm>) => {
+        setData((prev) => ({ ...prev, actividades: prev.actividades.map((a) => (a.fecha === fecha ? { ...a, ...cambios } : a)) }));
+    };
+
+    const quitarActividad = (fecha: string) => {
+        setData((prev) => ({ ...prev, actividades: prev.actividades.filter((a) => a.fecha !== fecha) }));
     };
 
     const guardar = (e: FormEvent) => {
         e.preventDefault();
 
-        // Solo viajan los días diligenciados, con los campos que espera el servidor
+        // Solo los campos que espera el servidor (sin nombres ni referencias de productos)
         transform((d) => ({
             departamento_id: d.departamento_id,
+            regional: d.regional,
             agencia_id: d.agencia_id,
             mes: d.mes,
             coor_nacional_id: d.coor_nacional_id,
             coor_regional_id: d.coor_regional_id,
             responsable_id: d.responsable_id,
-            actividades: d.dias.filter(tieneDatos).map((dia) => ({
-                fecha: dia.fecha,
-                actividad_tipo_id: dia.actividad_tipo_id,
-                ciudad_id: dia.ciudad_id,
-                productos: dia.productos.map((p) => ({ producto: p.producto, cantidad: p.cantidad })),
-                asesores: dia.asesores,
-                checklist: dia.checklist,
+            actividades: d.actividades.map((a) => ({
+                fecha: a.fecha,
+                actividad_tipo_id: a.actividad_tipo_id,
+                ciudad_id: a.ciudad_id,
+                productos: a.productos.map((p) => ({ producto: p.producto, cantidad: p.cantidad })),
+                asesores: a.asesores,
+                checklist: a.checklist,
             })),
         }));
 
@@ -182,8 +303,8 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
     const hayErrores = Object.keys(errores).length > 0;
 
     return (
-        <AppLayout titulo="Actividades › Nueva programación" icono={<IconoActividades />}>
-            <Head title="Nueva programación" />
+        <AppLayout titulo={existente ? 'Actividades › Agregar actividades' : 'Actividades › Nueva programación'} icono={<IconoActividades />}>
+            <Head title={existente ? 'Agregar actividades' : 'Nueva programación'} />
 
             <PestanasActividades />
 
@@ -206,23 +327,30 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                             />
                         </Campo>
 
-                        <Campo etiqueta="Agencia" obligatorio error={errores.agencia_id}>
-                            <SelectBuscable
-                                opciones={agencias.map((a) => ({ valor: a.codigo, etiqueta: a.nombre }))}
-                                valor={data.agencia_id}
-                                onChange={cambiarAgencia}
-                                placeholder={cargando === 'agencias' ? 'Cargando...' : 'SELECCIONE'}
+                        <Campo etiqueta="Regional" obligatorio error={errores.regional}>
+                            <select
+                                value={data.regional}
+                                onChange={(e) => cambiarRegional(e.target.value)}
                                 disabled={!data.departamento_id || cargando === 'agencias'}
-                                conError={!!errores.agencia_id}
-                            />
+                                className={inputClass}
+                            >
+                                <option value="">{cargando === 'agencias' ? 'Cargando...' : data.departamento_id ? 'SELECCIONE' : 'Seleccione el departamento'}</option>
+                                {regionales.map((r) => (
+                                    <option key={r} value={r}>
+                                        {r}
+                                    </option>
+                                ))}
+                            </select>
                         </Campo>
 
-                        <Campo etiqueta="Regional">
-                            <input
-                                value={cargando === 'agencia' ? 'Cargando...' : (datosAgencia?.regional ?? '')}
-                                disabled
-                                placeholder="Se llena con la agencia"
-                                className={inputClass}
+                        <Campo etiqueta="Agencia" obligatorio error={errores.agencia_id}>
+                            <SelectBuscable
+                                opciones={agenciasDeRegional.map((a) => ({ valor: a.codigo, etiqueta: a.nombre }))}
+                                valor={data.agencia_id}
+                                onChange={(codigo) => cambiarAgencia(codigo)}
+                                placeholder={cargando === 'agencia' ? 'Cargando...' : data.regional ? 'SELECCIONE' : 'Seleccione la regional'}
+                                disabled={!data.regional}
+                                conError={!!errores.agencia_id}
                             />
                         </Campo>
 
@@ -238,68 +366,140 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                     </div>
                 </Seccion>
 
-                <Seccion titulo="Responsables">
-                    <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                        <Campo etiqueta="Coordinador nacional" obligatorio error={errores.coor_nacional_id}>
-                            <SelectBuscable
-                                opciones={coordinadoresNacionales.map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
-                                valor={data.coor_nacional_id}
-                                onChange={(v) => setData('coor_nacional_id', v)}
-                                conError={!!errores.coor_nacional_id}
-                            />
-                        </Campo>
-
-                        <Campo etiqueta="Coordinador regional" obligatorio error={errores.coor_regional_id}>
-                            <SelectBuscable
-                                opciones={(datosAgencia?.coordinadoresRegionales ?? []).map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
-                                valor={data.coor_regional_id}
-                                onChange={(v) => setData('coor_regional_id', v)}
-                                placeholder={data.agencia_id ? 'SELECCIONE' : 'Seleccione la agencia'}
-                                disabled={!datosAgencia}
-                                conError={!!errores.coor_regional_id}
-                            />
-                            {datosAgencia && datosAgencia.coordinadoresRegionales.length === 0 && (
-                                <p className="mt-1 text-xs text-amber-700">La agencia no tiene coordinador regional asignado.</p>
-                            )}
-                        </Campo>
-
-                        <Campo etiqueta="Responsable" obligatorio error={errores.responsable_id}>
-                            <SelectBuscable
-                                opciones={responsables.map((r) => ({ valor: r.coduser, etiqueta: r.nombre }))}
-                                valor={data.responsable_id}
-                                onChange={(v) => setData('responsable_id', v)}
-                                conError={!!errores.responsable_id}
-                            />
-                            {responsables.length === 0 && (
-                                <p className="mt-1 text-xs text-amber-700">
-                                    Ningún usuario tiene un perfil con el permiso "Puede ser responsable de actividad".
-                                </p>
-                            )}
-                        </Campo>
+                {existente && (
+                    <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                        <svg className="mt-0.5 shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                        <p>
+                            <strong>{nombreAgencia || 'La agencia'}</strong> ya tiene programación en <strong>{etiquetaMes}</strong> con{' '}
+                            {existente.fechas.length} actividad(es). Las actividades que agregue se sumarán a esa programación y se conservan sus
+                            responsables.
+                        </p>
                     </div>
-                </Seccion>
+                )}
+
+                {existente ? (
+                    <Seccion titulo="Responsables (de la programación existente)">
+                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                            <Campo etiqueta="Coordinador nacional">
+                                <input value={existente.coorNacional.nombre} disabled className={inputClass} />
+                            </Campo>
+                            <Campo etiqueta="Coordinador regional">
+                                <input value={existente.coorRegional.nombre} disabled className={inputClass} />
+                            </Campo>
+                            <Campo etiqueta="Responsable">
+                                <input value={existente.responsable.nombre} disabled className={inputClass} />
+                            </Campo>
+                        </div>
+                    </Seccion>
+                ) : (
+                    <Seccion titulo="Responsables">
+                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                            <Campo etiqueta="Coordinador nacional" obligatorio error={errores.coor_nacional_id}>
+                                <SelectBuscable
+                                    opciones={coordinadoresNacionales.map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
+                                    valor={data.coor_nacional_id}
+                                    onChange={(v) => setData('coor_nacional_id', v)}
+                                    conError={!!errores.coor_nacional_id}
+                                />
+                            </Campo>
+    
+                            <Campo etiqueta="Coordinador regional" obligatorio error={errores.coor_regional_id}>
+                                <SelectBuscable
+                                    opciones={(datosAgencia?.coordinadoresRegionales ?? []).map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
+                                    valor={data.coor_regional_id}
+                                    onChange={(v) => setData('coor_regional_id', v)}
+                                    placeholder={data.agencia_id ? 'SELECCIONE' : 'Seleccione la agencia'}
+                                    disabled={!datosAgencia}
+                                    conError={!!errores.coor_regional_id}
+                                />
+                                {datosAgencia && datosAgencia.coordinadoresRegionales.length === 0 && (
+                                    <p className="mt-1 text-xs text-amber-700">La agencia no tiene coordinador regional asignado.</p>
+                                )}
+                            </Campo>
+    
+                            <Campo etiqueta="Responsable" obligatorio error={errores.responsable_id}>
+                                <SelectBuscable
+                                    opciones={responsables.map((r) => ({ valor: r.coduser, etiqueta: r.nombre }))}
+                                    valor={data.responsable_id}
+                                    onChange={(v) => setData('responsable_id', v)}
+                                    conError={!!errores.responsable_id}
+                                />
+                                {responsables.length === 0 && (
+                                    <p className="mt-1 text-xs text-amber-700">
+                                        Ningún usuario tiene un perfil con el permiso "Puede ser responsable de actividad".
+                                    </p>
+                                )}
+                            </Campo>
+                        </div>
+                    </Seccion>
+                )}
 
                 <Seccion
                     titulo="Actividades del mes"
-                    acciones={<span className="text-xs font-medium text-blue-700">{diasConActividad} día(s) con actividad</span>}
+                    acciones={<span className="text-xs font-medium text-blue-700">{data.actividades.length} actividad(es) agregada(s)</span>}
                 >
-                    <p className="mb-3 text-xs text-slate-500">Diligencie solo los días que tendrán actividad; los días vacíos no se guardan.</p>
-
-                    <div className="space-y-2">
-                        {data.dias.map((dia, i) => (
-                            <FilaDia
-                                key={dia.fecha}
-                                dia={dia}
-                                error={(campo) => (indiceEnvio[i] >= 0 ? errores[`actividades.${indiceEnvio[i]}.${campo}`] : undefined)}
-                                tipos={tipos}
-                                checklist={checklist}
-                                asesores={asesores}
-                                datosAgencia={datosAgencia}
-                                agenciaSeleccionada={!!data.agencia_id}
-                                onChange={(cambios) => actualizarDia(i, cambios)}
+                    {/* Agregar: fecha + tipo */}
+                    <div className="grid gap-3 rounded-lg border border-dashed border-blue-200 bg-blue-50/40 p-3 sm:grid-cols-[180px_1fr_auto] sm:items-end">
+                        <Campo etiqueta="Fecha actividad" obligatorio>
+                            <input
+                                type="date"
+                                value={nuevaFecha}
+                                min={limites.min}
+                                max={limites.max}
+                                onChange={(e) => setNuevaFecha(e.target.value)}
+                                onKeyDown={agregarConEnter}
+                                className={inputClass}
                             />
-                        ))}
+                        </Campo>
+
+                        <Campo etiqueta="Tipo de actividad" obligatorio>
+                            <select value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value)} onKeyDown={agregarConEnter} className={inputClass}>
+                                <option value="">SELECCIONE</option>
+                                {tipos.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.nombre}
+                                    </option>
+                                ))}
+                            </select>
+                        </Campo>
+
+                        <button
+                            type="button"
+                            onClick={agregarActividad}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                <path d="M12 5v14M5 12h14" />
+                            </svg>
+                            Agregar
+                        </button>
                     </div>
+                    {errorNueva && <p className="mt-2 text-xs text-red-600">{errorNueva}</p>}
+
+                    {/* Actividades agregadas */}
+                    {data.actividades.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-slate-400">Aún no ha agregado actividades para este mes.</p>
+                    ) : (
+                        <div className="mt-4 space-y-3">
+                            {data.actividades.map((actividad, i) => (
+                                <TarjetaActividad
+                                    key={actividad.fecha}
+                                    actividad={actividad}
+                                    error={(campo) => errores[`actividades.${i}.${campo}`]}
+                                    tipos={tipos}
+                                    checklist={checklist}
+                                    asesores={asesores}
+                                    datosAgencia={datosAgencia}
+                                    agenciaSeleccionada={!!data.agencia_id}
+                                    onChange={(cambios) => actualizarActividad(actividad.fecha, cambios)}
+                                    onQuitar={() => quitarActividad(actividad.fecha)}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </Seccion>
 
                 <div className="flex justify-end gap-2">
@@ -311,7 +511,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                         disabled={processing}
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
-                        {processing ? 'Guardando…' : 'Guardar programación'}
+                        {processing ? 'Guardando…' : existente ? 'Agregar a la programación' : 'Guardar programación'}
                     </button>
                 </div>
             </form>
@@ -319,42 +519,37 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
     );
 }
 
-interface FilaDiaProps {
-    dia: Dia;
+interface TarjetaActividadProps {
+    actividad: ActividadForm;
     error: (campo: string) => string | undefined;
     tipos: Item[];
     checklist: Item[];
     asesores: Item[];
     datosAgencia: DatosAgencia | null;
     agenciaSeleccionada: boolean;
-    onChange: (cambios: Partial<Dia>) => void;
+    onChange: (cambios: Partial<ActividadForm>) => void;
+    onQuitar: () => void;
 }
 
-// Un día del mes: fecha, tipo y municipio; al elegir tipo se despliegan productos, asesores y checklist
-function FilaDia({ dia, error, tipos, checklist, asesores, datosAgencia, agenciaSeleccionada, onChange }: FilaDiaProps) {
-    const [anio, mes, numeroDia] = dia.fecha.split('-').map(Number);
-    const fecha = new Date(anio, mes - 1, numeroDia); // fecha local (evita el corrimiento por zona horaria)
-    const diaSemana = fecha.toLocaleDateString('es-CO', { weekday: 'long' });
-    const finDeSemana = fecha.getDay() === 0 || fecha.getDay() === 6;
-    const lleno = tieneDatos(dia);
+// Una actividad agregada: fecha fija, tipo y municipio editables, y su detalle (productos, asesores, checklist)
+function TarjetaActividad({ actividad, error, tipos, checklist, asesores, datosAgencia, agenciaSeleccionada, onChange, onQuitar }: TarjetaActividadProps) {
+    const [fecha, diaSemana] = formatearFecha(actividad.fecha);
 
     return (
-        <div className={`rounded-lg border ${lleno ? 'border-blue-200 bg-white shadow-sm' : finDeSemana ? 'border-slate-200 bg-slate-50' : 'border-slate-200 bg-white'}`}>
-            <div className="grid gap-3 p-3 md:grid-cols-[150px_1fr_1fr_auto] md:items-start">
+        <div className="rounded-lg border border-blue-200 bg-white shadow-sm">
+            <div className="grid gap-3 border-b border-slate-100 p-3 md:grid-cols-[150px_1fr_1fr_auto] md:items-start">
                 <div className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5">
-                    <p className="text-sm font-semibold text-slate-700">
-                        {String(numeroDia).padStart(2, '0')}/{String(mes).padStart(2, '0')}/{anio}
-                    </p>
+                    <p className="text-sm font-semibold text-slate-700">{fecha}</p>
                     <p className="text-xs text-slate-500 capitalize">{diaSemana}</p>
+                    {error('fecha') && <p className="text-xs text-red-600">{error('fecha')}</p>}
                 </div>
 
                 <div>
                     <select
-                        value={dia.actividad_tipo_id}
+                        value={actividad.actividad_tipo_id}
                         onChange={(e) => onChange({ actividad_tipo_id: e.target.value })}
                         className={`${inputClass} ${error('actividad_tipo_id') ? 'border-red-400' : ''}`}
                     >
-                        <option value="">TIPO DE ACTIVIDAD</option>
                         {tipos.map((t) => (
                             <option key={t.id} value={t.id}>
                                 {t.nombre}
@@ -367,7 +562,7 @@ function FilaDia({ dia, error, tipos, checklist, asesores, datosAgencia, agencia
                 <div>
                     <SelectBuscable
                         opciones={(datosAgencia?.municipios ?? []).map((m) => ({ valor: String(m.id), etiqueta: m.nombre }))}
-                        valor={dia.ciudad_id}
+                        valor={actividad.ciudad_id}
                         onChange={(v) => onChange({ ciudad_id: v })}
                         placeholder={datosAgencia ? 'MUNICIPIO' : 'Seleccione la agencia'}
                         disabled={!datosAgencia}
@@ -376,39 +571,34 @@ function FilaDia({ dia, error, tipos, checklist, asesores, datosAgencia, agencia
                     {error('ciudad_id') && <p className="mt-1 text-xs text-red-600">{error('ciudad_id')}</p>}
                 </div>
 
-                <div className="flex h-[38px] items-center">
-                    {lleno && (
-                        <button
-                            type="button"
-                            onClick={() => onChange(diaVacio)}
-                            title="Limpiar este día"
-                            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                        >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                                <path d="M18 6 6 18M6 6l12 12" />
-                            </svg>
-                        </button>
-                    )}
-                </div>
+                <button
+                    type="button"
+                    onClick={onQuitar}
+                    title="Quitar esta actividad"
+                    className="inline-flex h-[38px] items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 transition-colors hover:border-red-300 hover:bg-red-100"
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                    Quitar
+                </button>
             </div>
 
-            {lleno && (
-                <div className="border-t border-slate-100 p-3">
-                    <DetalleActividad
-                        valor={dia}
-                        onChange={onChange}
-                        inventario={datosAgencia && !datosAgencia.inventarioError ? datosAgencia.inventario : null}
-                        mensajeInventario={
-                            !agenciaSeleccionada
-                                ? 'Seleccione la agencia para ver su inventario.'
-                                : (datosAgencia?.inventarioError ?? 'Cargando inventario...')
-                        }
-                        asesores={asesores}
-                        checklist={checklist}
-                        error={error}
-                    />
-                </div>
-            )}
+            <div className="p-3">
+                <DetalleActividad
+                    valor={actividad}
+                    onChange={onChange}
+                    inventario={datosAgencia && !datosAgencia.inventarioError ? datosAgencia.inventario : null}
+                    mensajeInventario={
+                        !agenciaSeleccionada ? 'Seleccione la agencia para ver su inventario.' : (datosAgencia?.inventarioError ?? 'Cargando inventario...')
+                    }
+                    asesores={asesores}
+                    checklist={checklist}
+                    error={error}
+                />
+            </div>
         </div>
     );
 }

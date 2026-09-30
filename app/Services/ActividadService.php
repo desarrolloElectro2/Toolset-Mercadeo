@@ -45,13 +45,7 @@ class ActividadService
             'estado'   => (string) $request->query('estado', ''),
         ];
 
-        $actividades = Actividad::query()
-            ->from('actividades as a')
-            ->join('actividad_programaciones as p', 'p.id', '=', 'a.programacion_id')
-            ->select(['a.*', 'p.agencia_id', 'p.regional', 'p.responsable_id'])
-            ->when($filtros['regional'] !== '', fn ($q) => $q->where('p.regional', $filtros['regional']))
-            ->when($filtros['agencia'] !== '', fn ($q) => $q->where('p.agencia_id', $filtros['agencia']))
-            ->when($filtros['estado'] !== '', fn ($q) => $q->where('a.estado', $filtros['estado']))
+        $actividades = $this->consultaFiltrada($filtros)
             ->when(preg_match('/^\d{4}-\d{2}$/', $filtros['mes']) === 1, function ($q) use ($filtros) {
                 $inicio = Carbon::createFromFormat('Y-m-d', $filtros['mes'].'-01');
                 $q->whereBetween('a.fecha', [$inicio->toDateString(), $inicio->copy()->endOfMonth()->toDateString()]);
@@ -62,14 +56,79 @@ class ActividadService
             ->paginate(self::POR_PAGINA)
             ->withQueryString();
 
-        // Nombres de otras BD, solo para las filas de esta página
-        $filas = collect($actividades->items());
+        $actividades->through($this->mapeadorFila(collect($actividades->items())));
+
+        return [
+            'actividades' => $actividades,
+            'filtros'     => $filtros,
+            'opciones'    => $this->opcionesFiltros(),
+        ];
+    }
+
+    // Página del calendario: solo las opciones de filtros; los eventos se piden por rango (eventosCalendario)
+    public function datosCalendario(): array
+    {
+        return ['opciones' => $this->opcionesFiltros()];
+    }
+
+    /**
+     * Actividades entre dos fechas (el rango visible del calendario), con los mismos filtros de la lista.
+     * El rango se limita a 62 días: el mes más largo del calendario muestra 6 semanas (42 días).
+     */
+    public function eventosCalendario(Request $request): array
+    {
+        $validator = Validator::make($request->query(), [
+            'inicio' => ['required', 'date_format:Y-m-d'],
+            'fin'    => ['required', 'date_format:Y-m-d', 'after:inicio'],
+        ]);
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
+
+        $inicio = Carbon::createFromFormat('Y-m-d', $request->query('inicio'))->startOfDay();
+        $fin = Carbon::createFromFormat('Y-m-d', $request->query('fin'))->startOfDay();
+        if ($inicio->diffInDays($fin) > 62) {
+            $fin = $inicio->copy()->addDays(62);
+        }
+
+        $filtros = [
+            'regional' => (string) $request->query('regional', ''),
+            'agencia'  => (string) $request->query('agencia', ''),
+            'estado'   => (string) $request->query('estado', ''),
+        ];
+
+        // FullCalendar envía el fin exclusivo (primer día que ya no se ve)
+        $filas = $this->consultaFiltrada($filtros)
+            ->where('a.fecha', '>=', $inicio->toDateString())
+            ->where('a.fecha', '<', $fin->toDateString())
+            ->orderBy('a.fecha')
+            ->orderBy('a.id')
+            ->get();
+
+        return $filas->map($this->mapeadorFila($filas))->values()->all();
+    }
+
+    // Actividades + datos de su programación, con los filtros comunes de lista y calendario
+    private function consultaFiltrada(array $filtros)
+    {
+        return Actividad::query()
+            ->from('actividades as a')
+            ->join('actividad_programaciones as p', 'p.id', '=', 'a.programacion_id')
+            ->select(['a.*', 'p.agencia_id', 'p.regional', 'p.responsable_id'])
+            ->when(($filtros['regional'] ?? '') !== '', fn ($q) => $q->where('p.regional', $filtros['regional']))
+            ->when(($filtros['agencia'] ?? '') !== '', fn ($q) => $q->where('p.agencia_id', $filtros['agencia']))
+            ->when(($filtros['estado'] ?? '') !== '', fn ($q) => $q->where('a.estado', $filtros['estado']));
+    }
+
+    // Convierte una actividad en fila para la vista; los nombres de otras BD se buscan una sola vez para todas
+    private function mapeadorFila($filas): \Closure
+    {
         $agencias = Agencia::query()->whereIn('codagen', $filas->pluck('agencia_id')->unique())->pluck('agennom', 'codagen');
         $municipios = Ciudad::query()->whereIn('id', $filas->pluck('ciudad_id')->unique())->pluck('ciudad', 'id');
         $responsables = Usuario::query()->whereIn('coduser', $filas->pluck('responsable_id')->unique())->pluck('nombre', 'coduser');
         $tipos = ActividadTipo::query()->pluck('nombre', 'id');
 
-        $actividades->through(fn (Actividad $a) => [
+        return fn (Actividad $a) => [
             'id'          => $a->id,
             'fecha'       => $a->fecha->format('Y-m-d'),
             'regional'    => $a->regional,
@@ -81,12 +140,6 @@ class ActividadService
             'horaFin'     => $a->hora_fin ? substr($a->hora_fin, 0, 5) : null,
             'estado'      => $a->estado,
             'editable'    => in_array($a->estado, self::ESTADOS_EDITABLES, true),
-        ]);
-
-        return [
-            'actividades' => $actividades,
-            'filtros'     => $filtros,
-            'opciones'    => $this->opcionesFiltros(),
         ];
     }
 
@@ -133,12 +186,26 @@ class ActividadService
                     ->where('actividad_id', $actividad->id)->pluck('checklist_item_id')->map(fn ($id) => (int) $id),
             ],
             'programacion' => [
+                'id'           => $programacion->id,
+                // Solo se agregan actividades al mes actual o a meses siguientes
+                'admiteNuevas' => Carbon::create($programacion->anio, $programacion->mes, 1)->gte(now()->startOfMonth()),
                 'agencia'      => $agencia->agennom,
                 'regional'     => $programacion->regional,
                 'mes'          => self::MESES[$programacion->mes - 1].' '.$programacion->anio,
                 'coorNacional' => $personas[$programacion->coor_nacional_id] ?? $programacion->coor_nacional_id,
                 'coorRegional' => $personas[$programacion->coor_regional_id] ?? $programacion->coor_regional_id,
                 'responsable'  => $personas[$programacion->responsable_id] ?? $programacion->responsable_id,
+            ],
+            'ejecucion' => [
+                'horaInicio'     => $actividad->hora_inicio ? substr($actividad->hora_inicio, 0, 5) : null,
+                'horaFin'        => $actividad->hora_fin ? substr($actividad->hora_fin, 0, 5) : null,
+                'observaciones'  => $actividad->observaciones,
+                'tieneFoto'      => (bool) $actividad->foto_inicio,
+                // Antes de la fecha programada no se puede iniciar
+                'antesDeFecha'   => $actividad->fecha->gt(today()),
+                'motivoAnulacion' => $actividad->estado === Actividad::ANULADA
+                    ? $actividad->historial()->where('estado', Actividad::ANULADA)->latest('id')->value('observacion')
+                    : null,
             ],
             'editable'        => $editable,
             'tipos'           => ActividadTipo::query()->orderBy('nombre')->get(['id', 'nombre']),

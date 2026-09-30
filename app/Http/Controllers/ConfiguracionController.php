@@ -8,7 +8,7 @@ use Inertia\Inertia;
 class ConfiguracionController extends Controller
 {
     /** Permisos de los submódulos de Configuración: con cualquiera de ellos se puede entrar. */
-    private const PERMISOS_SUBMODULOS = ['usu_list', 'rol_list'];
+    private const PERMISOS_SUBMODULOS = ['usu_list', 'rol_list', 'tip_actividad'];
 
     public function index()
     {

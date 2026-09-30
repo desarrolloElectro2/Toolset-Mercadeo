@@ -20,6 +20,10 @@
         "vite": "^7.0.7"
     },
     "dependencies": {
+        "@fullcalendar/core": "~6.1.21",
+        "@fullcalendar/daygrid": "~6.1.21",
+        "@fullcalendar/list": "~6.1.21",
+        "@fullcalendar/react": "~6.1.21",
         "@inertiajs/react": "^3.7.1",
         "react": "^19.3.0",
         "react-dom": "^19.3.0"

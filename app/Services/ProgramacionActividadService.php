@@ -28,8 +28,11 @@ class ProgramacionActividadService
     ) {
     }
 
-    // Datos fijos del formulario (no dependen de la agencia)
-    public function datosFormulario(): array
+    /**
+     * Datos fijos del formulario (no dependen de la agencia).
+     * $programacion: si se llega desde una actividad, el formulario abre con su departamento, agencia y mes.
+     */
+    public function datosFormulario(?ActividadProgramacion $programacion = null): array
     {
         return [
             'departamentos'          => $this->departamentosConAgencias(),
@@ -38,18 +41,55 @@ class ProgramacionActividadService
             'asesores'               => $this->asesores(),
             'coordinadoresNacionales' => $this->coordinadores('COORDINADOR_NACIONAL'),
             'responsables'           => $this->responsables(),
+            'inicial'                => $programacion ? [
+                'departamento_id' => (string) $programacion->departamento_id,
+                'agencia_id'      => $programacion->agencia_id,
+                'mes'             => sprintf('%04d-%02d', $programacion->anio, $programacion->mes),
+            ] : null,
         ];
     }
 
-    // Agencias activas de un departamento
+    /**
+     * Programación que ya tiene la agencia en ese mes ("YYYY-MM"), o null.
+     * Si existe, el formulario pasa a modo "agregar actividades" con sus responsables fijos.
+     */
+    public function programacionExistente(string $codagen, string $mes): ?array
+    {
+        if (preg_match('/^\d{4}-\d{2}$/', $mes) !== 1) {
+            return null;
+        }
+        [$anio, $numeroMes] = array_map('intval', explode('-', $mes));
+
+        $programacion = ActividadProgramacion::query()
+            ->where('agencia_id', $codagen)->where('anio', $anio)->where('mes', $numeroMes)->first();
+
+        if ($programacion === null) {
+            return null;
+        }
+
+        $nombres = Usuario::query()
+            ->whereIn('coduser', [$programacion->coor_nacional_id, $programacion->coor_regional_id, $programacion->responsable_id])
+            ->pluck('nombre', 'coduser');
+
+        return [
+            'id'           => $programacion->id,
+            'coorNacional' => ['coduser' => $programacion->coor_nacional_id, 'nombre' => $nombres[$programacion->coor_nacional_id] ?? $programacion->coor_nacional_id],
+            'coorRegional' => ['coduser' => $programacion->coor_regional_id, 'nombre' => $nombres[$programacion->coor_regional_id] ?? $programacion->coor_regional_id],
+            'responsable'  => ['coduser' => $programacion->responsable_id, 'nombre' => $nombres[$programacion->responsable_id] ?? $programacion->responsable_id],
+            // Fechas que ya tienen actividad: no se pueden volver a usar
+            'fechas'       => $this->fechasOcupadas($programacion),
+        ];
+    }
+
+    // Agencias activas de un departamento, con su regional (el formulario filtra Departamento -> Regional -> Agencia)
     public function agenciasDeDepartamento(int $departamentoId): array
     {
         return Agencia::query()
             ->where('activo', 1)
             ->where('departamento_id', $departamentoId)
             ->orderBy('agennom')
-            ->get(['codagen', 'agennom'])
-            ->map(fn (Agencia $a) => ['codigo' => $a->codagen, 'nombre' => $a->agennom])
+            ->get(['codagen', 'agennom', 'agenreg'])
+            ->map(fn (Agencia $a) => ['codigo' => $a->codagen, 'nombre' => $a->agennom, 'regional' => (string) $a->agenreg])
             ->all();
     }
 
@@ -70,8 +110,13 @@ class ProgramacionActividadService
         ];
     }
 
-    // Crea la programación y una actividad por cada día diligenciado
-    public function crear(Request $request): ActividadProgramacion
+    /**
+     * Crea la programación del mes con sus actividades; si la agencia ya tiene programación en ese mes,
+     * las actividades se agregan a la existente (conserva sus responsables).
+     *
+     * @return array{programacion: ActividadProgramacion, creadas: int, existente: bool}
+     */
+    public function crear(Request $request): array
     {
         $datos = $this->validarBasico($request);
 
@@ -81,25 +126,37 @@ class ProgramacionActividadService
         if ($agencia === null || (int) $agencia->departamento_id !== (int) $datos['departamento_id']) {
             throw ValidationException::withMessages(['agencia_id' => 'La agencia no es válida para el departamento seleccionado.']);
         }
+        if ((string) $agencia->agenreg !== $datos['regional']) {
+            throw ValidationException::withMessages(['agencia_id' => 'La agencia no pertenece a la regional seleccionada.']);
+        }
+
+        $existente =ActividadProgramacion::query()
+            ->where('agencia_id', $agencia->codagen)->where('anio', $anio)->where('mes', $mes)->first();
 
         $catalogos = $this->detalleService->catalogos($agencia);
-        $this->validarNegocio($datos, $agencia, $anio, $mes, $catalogos);
+        $this->validarNegocio($datos, $agencia, $anio, $mes, $catalogos, $existente);
 
         $coduser = (string) $request->user()->coduser;
 
-        return DB::connection('mysql')->transaction(function () use ($datos, $agencia, $anio, $mes, $catalogos, $coduser) {
-            $programacion = new ActividadProgramacion();
-            $programacion->departamento_id  = (int) $datos['departamento_id'];
-            $programacion->agencia_id       = $agencia->codagen;
-            $programacion->regional         = (string) $agencia->agenreg;
-            $programacion->anio             = $anio;
-            $programacion->mes              = $mes;
-            $programacion->coor_nacional_id = $datos['coor_nacional_id'];
-            $programacion->coor_regional_id = $datos['coor_regional_id'];
-            $programacion->responsable_id   = $datos['responsable_id'];
-            $programacion->user_new         = $coduser;
-            $programacion->user_update      = $coduser;
-            $programacion->save();
+        $programacion = DB::connection('mysql')->transaction(function () use ($datos, $agencia, $anio, $mes, $catalogos, $coduser, $existente) {
+            if ($existente !== null) {
+                $programacion = $existente;
+                $programacion->user_update = $coduser;
+                $programacion->save();
+            } else {
+                $programacion = new ActividadProgramacion();
+                $programacion->departamento_id  = (int) $datos['departamento_id'];
+                $programacion->agencia_id       = $agencia->codagen;
+                $programacion->regional         = (string) $agencia->agenreg;
+                $programacion->anio             = $anio;
+                $programacion->mes              = $mes;
+                $programacion->coor_nacional_id = $datos['coor_nacional_id'];
+                $programacion->coor_regional_id = $datos['coor_regional_id'];
+                $programacion->responsable_id   = $datos['responsable_id'];
+                $programacion->user_new         = $coduser;
+                $programacion->user_update      = $coduser;
+                $programacion->save();
+            }
 
             foreach ($datos['actividades'] as $dia) {
                 $actividad = new Actividad();
@@ -117,13 +174,19 @@ class ProgramacionActividadService
                 $historial = new ActividadHistorial();
                 $historial->actividad_id = $actividad->id;
                 $historial->estado       = Actividad::PROGRAMADA;
-                $historial->observacion  = 'Actividad programada';
+                $historial->observacion  = $existente !== null ? 'Actividad agregada a la programación del mes' : 'Actividad programada';
                 $historial->user_new     = $coduser;
                 $historial->save();
             }
 
             return $programacion;
         });
+
+        return [
+            'programacion' => $programacion,
+            'creadas'      => count($datos['actividades']),
+            'existente'    => $existente !== null,
+        ];
     }
 
     // Formato y campos obligatorios
@@ -131,6 +194,7 @@ class ProgramacionActividadService
     {
         $validator = Validator::make($request->all(), [
             'departamento_id'     => ['required', 'integer'],
+            'regional'            => ['required', 'string', 'max:10'],
             'agencia_id'          => ['required', 'string', 'max:6'],
             'mes'                 => ['required', 'date_format:Y-m'],
             'coor_nacional_id'    => ['required', 'string', 'max:7'],
@@ -141,6 +205,7 @@ class ProgramacionActividadService
             ...$this->detalleService->reglasDia('actividades.*'),
         ], [
             'departamento_id.required'     => 'Seleccione el departamento.',
+            'regional.required'            => 'Seleccione la regional.',
             'agencia_id.required'          => 'Seleccione la agencia.',
             'mes.required'                 => 'Seleccione el mes.',
             'mes.date_format'              => 'El mes no es válido.',
@@ -161,7 +226,7 @@ class ProgramacionActividadService
     }
 
     // Reglas que dependen de la BD: todo lo seleccionado debe existir y corresponder a la agencia
-    private function validarNegocio(array $datos, Agencia $agencia, int $anio, int $mes, array $catalogos): void
+    private function validarNegocio(array $datos, Agencia $agencia, int $anio, int $mes, array $catalogos, ?ActividadProgramacion $existente): void
     {
         $errores = [];
 
@@ -170,27 +235,29 @@ class ProgramacionActividadService
             $errores['mes'] = 'No se puede programar un mes que ya pasó.';
         }
 
-        $existe = ActividadProgramacion::query()
-            ->where('agencia_id', $agencia->codagen)->where('anio', $anio)->where('mes', $mes)->exists();
-        if ($existe) {
-            $errores['mes'] = "Ya existe una programación de {$agencia->agennom} para ese mes; edite sus actividades desde la lista.";
+        // Programación nueva: se validan sus responsables. Si ya existe, conserva los suyos.
+        if ($existente === null) {
+            if (! collect($this->coordinadores('COORDINADOR_NACIONAL'))->contains('coduser', $datos['coor_nacional_id'])) {
+                $errores['coor_nacional_id'] = 'El coordinador nacional no es válido.';
+            }
+            if (! collect($this->coordinadores('COORDINADOR_COMERCIAL', $agencia->codagen))->contains('coduser', $datos['coor_regional_id'])) {
+                $errores['coor_regional_id'] = 'El coordinador regional no corresponde a la agencia.';
+            }
+            if (! collect($this->responsables())->contains('coduser', $datos['responsable_id'])) {
+                $errores['responsable_id'] = 'El responsable no es válido.';
+            }
         }
 
-        if (! collect($this->coordinadores('COORDINADOR_NACIONAL'))->contains('coduser', $datos['coor_nacional_id'])) {
-            $errores['coor_nacional_id'] = 'El coordinador nacional no es válido.';
-        }
-        if (! collect($this->coordinadores('COORDINADOR_COMERCIAL', $agencia->codagen))->contains('coduser', $datos['coor_regional_id'])) {
-            $errores['coor_regional_id'] = 'El coordinador regional no corresponde a la agencia.';
-        }
-        if (! collect($this->responsables())->contains('coduser', $datos['responsable_id'])) {
-            $errores['responsable_id'] = 'El responsable no es válido.';
-        }
+        // Fechas que ya tienen actividad en la programación existente (fecha => id)
+        $ocupadas = $existente ? collect($this->fechasOcupadas($existente))->pluck('id', 'fecha')->all() : [];
 
         foreach ($datos['actividades'] as $i => $dia) {
             $fecha = Carbon::createFromFormat('Y-m-d', $dia['fecha']);
 
             if ($fecha->year !== $anio || $fecha->month !== $mes) {
                 $errores["actividades.$i.fecha"] = 'La fecha no pertenece al mes seleccionado.';
+            } elseif (isset($ocupadas[$dia['fecha']])) {
+                $errores["actividades.$i.fecha"] = "Ya existe la actividad #{$ocupadas[$dia['fecha']]} en esa fecha.";
             }
 
             $errores += $this->detalleService->erroresDia($dia, "actividades.$i", $catalogos);
@@ -199,6 +266,17 @@ class ProgramacionActividadService
         if ($errores !== []) {
             throw ValidationException::withMessages($errores);
         }
+    }
+
+    // [['fecha' => 'YYYY-MM-DD', 'id' => 12], ...] de las actividades de la programación (cualquier estado)
+    private function fechasOcupadas(ActividadProgramacion $programacion): array
+    {
+        return DB::connection('mysql')->table('actividades')
+            ->where('programacion_id', $programacion->id)
+            ->orderBy('fecha')
+            ->get(['id', 'fecha'])
+            ->map(fn ($a) => ['fecha' => (string) $a->fecha, 'id' => (int) $a->id])
+            ->all();
     }
 
     // Departamentos que tienen al menos una agencia activa

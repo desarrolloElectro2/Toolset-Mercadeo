@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { IconoActividades, IconoConfiguracion, IconoPerfiles, IconoPrincipal, IconoUsuarios } from '@/components/Iconos';
+import { IconoActividades, IconoConfiguracion, IconoPerfiles, IconoPrincipal, IconoTiposActividad, IconoUsuarios } from '@/components/Iconos';
 
 export interface ModuloMenu {
     label: string;
@@ -50,6 +50,13 @@ const iconoActividades = (
     </svg>
 );
 
+const iconoTiposActividad = (
+    <svg viewBox="0 0 40 40" fill="none" width="40" height="40">
+        <path d="M21 5H9a4 4 0 0 0-4 4v12l15 15a3 3 0 0 0 4.2 0L35.2 25a3 3 0 0 0 0-4.2z" fill="#3b82f6" opacity="0.5" />
+        <circle cx="13" cy="13" r="3" fill="#3b82f6" />
+    </svg>
+);
+
 // Registro único de módulos: menú lateral y tarjetas salen de aquí.
 // Para agregar un módulo (o submódulo) nuevo basta con añadirlo a esta lista.
 export const modulos: ModuloMenu[] = [
@@ -63,6 +70,13 @@ export const modulos: ModuloMenu[] = [
         submodulos: [
             { label: 'Usuarios', href: '/configuracion/usuarios', icono: <IconoUsuarios />, permiso: 'usu_list', iconoTarjeta: iconoUsuarios },
             { label: 'Perfiles', href: '/configuracion/perfiles', icono: <IconoPerfiles />, permiso: 'rol_list', iconoTarjeta: iconoPerfiles },
+            {
+                label: 'Tipos actividad',
+                href: '/configuracion/tipos-actividad',
+                icono: <IconoTiposActividad />,
+                permiso: 'tip_actividad',
+                iconoTarjeta: iconoTiposActividad,
+            },
         ],
     },
 ];

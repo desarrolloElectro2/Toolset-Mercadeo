@@ -1,6 +1,7 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
 import DetalleActividad from '@/components/actividades/DetalleActividad';
+import EjecucionActividad, { DatosEjecucion } from '@/components/actividades/EjecucionActividad';
 import EstadoActividad from '@/components/actividades/EstadoActividad';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
 import Campo, { inputClass } from '@/components/Campo';
@@ -21,6 +22,8 @@ interface Props {
         ciudad_id: string;
     };
     programacion: {
+        id: number;
+        admiteNuevas: boolean;
         agencia: string;
         regional: string;
         mes: string;
@@ -28,6 +31,7 @@ interface Props {
         coorRegional: string;
         responsable: string;
     };
+    ejecucion: DatosEjecucion;
     editable: boolean;
     tipos: Item[];
     checklist: Item[];
@@ -47,7 +51,7 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
     );
 }
 
-export default function Edit({ actividad, programacion, editable, tipos, checklist, asesores, municipios, inventario, inventarioError, historial }: Props) {
+export default function Edit({ actividad, programacion, ejecucion, editable, tipos, checklist, asesores, municipios, inventario, inventarioError, historial }: Props) {
     const can = useCan();
     const soloLectura = !editable || !can('act_edit');
 
@@ -82,7 +86,23 @@ export default function Edit({ actividad, programacion, editable, tipos, checkli
                     </p>
                 )}
 
-                <Seccion titulo="Programación">
+                <Seccion
+                    titulo="Programación"
+                    acciones={
+                        programacion.admiteNuevas &&
+                        can('act_create') && (
+                            <Link
+                                href={url(`/actividades/programacion/crear?programacion=${programacion.id}`)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700 hover:border-blue-300 hover:bg-blue-50"
+                            >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                    <path d="M12 5v14M5 12h14" />
+                                </svg>
+                                Agregar actividad a esta programación
+                            </Link>
+                        )
+                    }
+                >
                     <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Dato etiqueta="Agencia" valor={programacion.agencia} />
                         <Dato etiqueta="Regional" valor={programacion.regional} />
@@ -151,6 +171,17 @@ export default function Edit({ actividad, programacion, editable, tipos, checkli
                         </button>
                     )}
                 </div>
+            </form>
+
+            <div className="mt-4 space-y-4">
+                <EjecucionActividad
+                    actividadId={actividad.id}
+                    estado={actividad.estado}
+                    fecha={fecha}
+                    ejecucion={ejecucion}
+                    puedeEjecutar={can('act_edit')}
+                    puedeAnular={can('act_anular')}
+                />
 
                 <Seccion titulo="Historial">
                     {historial.length === 0 ? (
@@ -180,7 +211,7 @@ export default function Edit({ actividad, programacion, editable, tipos, checkli
                         </table>
                     )}
                 </Seccion>
-            </form>
+            </div>
         </AppLayout>
     );
 }
