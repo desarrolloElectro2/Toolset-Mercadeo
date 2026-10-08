@@ -11,9 +11,11 @@ import { url } from '@/lib/url';
 import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
 
 interface DatosAgencia {
-    regional: string;
     coordinadoresRegionales: Persona[];
     municipios: Item[];
+    /** 'correrias' = municipios de las correrías de la agencia; 'departamento' = no tiene correrías */
+    municipiosOrigen: 'correrias' | 'departamento';
+    asesores: Persona[];
     inventario: ProductoInventario[];
     inventarioError: string | null;
 }
@@ -27,27 +29,23 @@ interface ActividadForm extends DetalleDia {
 interface AgenciaOpcion {
     codigo: string;
     nombre: string;
-    regional: string;
 }
 
 // Programación que la agencia ya tiene en el mes: las actividades nuevas se suman a ella
 interface ProgramacionExistente {
     id: number;
-    coorNacional: Persona;
     coorRegional: Persona;
     responsable: Persona;
     fechas: { fecha: string; id: number }[];
 }
 
 interface Props {
-    departamentos: Item[];
+    regionales: string[];
     tipos: Item[];
     checklist: Item[];
-    asesores: Item[];
-    coordinadoresNacionales: Persona[];
     responsables: Persona[];
     /** Al llegar desde una actividad ("Agregar actividad a esta programación") */
-    inicial: { departamento_id: string; agencia_id: string; mes: string } | null;
+    inicial: { regional: string; agencia_id: string; mes: string } | null;
 }
 
 const MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
@@ -82,14 +80,12 @@ async function obtenerJson<T>(ruta: string): Promise<T> {
     return respuesta.json();
 }
 
-export default function Create({ departamentos, tipos, checklist, asesores, coordinadoresNacionales, responsables, inicial }: Props) {
+export default function Create({ regionales, tipos, checklist, responsables, inicial }: Props) {
     const meses = useMemo(mesesDisponibles, []);
     const { data, setData, post, processing, errors, transform } = useForm({
-        departamento_id: '',
         regional: '',
         agencia_id: '',
         mes: inicial?.mes ?? meses[0].valor,
-        coor_nacional_id: '',
         coor_regional_id: '',
         responsable_id: '',
         actividades: [] as ActividadForm[],
@@ -97,19 +93,23 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
     const errores = errors as Record<string, string>;
 
     const [agencias, setAgencias] = useState<AgenciaOpcion[]>([]);
-    // Regionales que tienen agencias en el departamento, y las agencias de la regional elegida
-    const regionales = useMemo(() => [...new Set(agencias.map((a) => a.regional))].sort(), [agencias]);
-    const agenciasDeRegional = agencias.filter((a) => a.regional === data.regional);
     const [datosAgencia, setDatosAgencia] = useState<DatosAgencia | null>(null);
     const [cargando, setCargando] = useState<'agencias' | 'agencia' | null>(null);
     const [errorCarga, setErrorCarga] = useState<string | null>(null);
     const agenciaSolicitada = useRef('');
+    const regionalSolicitada = useRef('');
 
     // Programación existente de la agencia en el mes (modo "agregar actividades")
     const [existente, setExistente] = useState<ProgramacionExistente | null>(null);
     const consultaExistente = useRef('');
     const etiquetaMes = meses.find((m) => m.valor === data.mes)?.etiqueta ?? data.mes;
     const nombreAgencia = agencias.find((a) => a.codigo === data.agencia_id)?.nombre ?? '';
+
+    // Fila para agregar una actividad: fecha + tipo
+    const [nuevaFecha, setNuevaFecha] = useState('');
+    const [nuevoTipo, setNuevoTipo] = useState('');
+    const [errorNueva, setErrorNueva] = useState<string | null>(null);
+    const limites = limitesMes(data.mes);
 
     const consultarExistente = (agencia: string, mes: string) => {
         setExistente(null);
@@ -127,7 +127,6 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                     // Se conservan los responsables de la programación existente
                     setData((prev) => ({
                         ...prev,
-                        coor_nacional_id: programacion.coorNacional.coduser,
                         coor_regional_id: programacion.coorRegional.coduser,
                         responsable_id: programacion.responsable.coduser,
                     }));
@@ -136,61 +135,41 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
             .catch(() => setErrorCarga('No se pudo verificar si la agencia ya tiene programación en el mes.'));
     };
 
-    // Fila para agregar una actividad: fecha + tipo
-    const [nuevaFecha, setNuevaFecha] = useState('');
-    const [nuevoTipo, setNuevoTipo] = useState('');
-    const [errorNueva, setErrorNueva] = useState<string | null>(null);
-    const limites = limitesMes(data.mes);
-
-    const cambiarDepartamento = (id: string) => {
+    // Regional -> carga sus agencias; lo que dependía de la agencia anterior se limpia
+    const cambiarRegional = (regional: string) => {
         setData((prev) => ({
             ...prev,
-            departamento_id: id,
-            regional: '',
+            regional,
             agencia_id: '',
             coor_regional_id: '',
-            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [], asesores: [] })),
         }));
         setAgencias([]);
         setDatosAgencia(null);
         setErrorCarga(null);
         consultarExistente('', data.mes);
-        if (!id) return Promise.resolve([] as AgenciaOpcion[]);
+        agenciaSolicitada.current = '';
+        regionalSolicitada.current = regional;
+        if (!regional) return Promise.resolve();
 
         setCargando('agencias');
-        return obtenerJson<AgenciaOpcion[]>(url(`/actividades/datos/agencias?departamento_id=${id}`))
+        return obtenerJson<AgenciaOpcion[]>(url(`/actividades/datos/agencias?regional=${encodeURIComponent(regional)}`))
             .then((lista) => {
-                setAgencias(lista);
-                // Si el departamento tiene una sola regional, se selecciona sola
-                const unicas = [...new Set(lista.map((a) => a.regional))];
-                if (unicas.length === 1) setData((prev) => ({ ...prev, regional: unicas[0] }));
-                return lista;
+                if (regionalSolicitada.current === regional) setAgencias(lista);
             })
-            .catch(() => {
-                setErrorCarga('No se pudieron cargar las agencias. Intente de nuevo.');
-                return [] as AgenciaOpcion[];
-            })
+            .catch(() => setErrorCarga('No se pudieron cargar las agencias. Intente de nuevo.'))
             .finally(() => setCargando(null));
-    };
-
-    // Otra regional: si la agencia elegida no es de esa regional, se quita
-    const cambiarRegional = (regional: string) => {
-        setData((prev) => ({ ...prev, regional }));
-        const agenciaActual = agencias.find((a) => a.codigo === data.agencia_id);
-        if (agenciaActual && agenciaActual.regional !== regional) {
-            cambiarAgencia('');
-        }
     };
 
     // mes: se pasa explícito cuando se llama antes de que data.mes se actualice (carga inicial)
     const cambiarAgencia = (codigo: string, mes: string = data.mes) => {
         consultarExistente(codigo, mes);
-        // Otra agencia = otro inventario: se quitan los productos ya elegidos
+        // Otra agencia = otro inventario, otros municipios y otros asesores
         setData((prev) => ({
             ...prev,
             agencia_id: codigo,
             coor_regional_id: '',
-            actividades: prev.actividades.map((a) => ({ ...a, productos: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [], asesores: [] })),
         }));
         setDatosAgencia(null);
         setErrorCarga(null);
@@ -203,7 +182,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                 if (agenciaSolicitada.current !== codigo) return; // llegó la respuesta de una agencia anterior
                 setDatosAgencia(datos);
                 if (datos.coordinadoresRegionales.length === 1) {
-                    setData((prev) => ({ ...prev, coor_regional_id: datos.coordinadoresRegionales[0].coduser }));
+                    setData((prev) => ({ ...prev, coor_regional_id: prev.coor_regional_id || datos.coordinadoresRegionales[0].coduser }));
                 }
             })
             .catch(() => setErrorCarga('No se pudieron cargar los datos de la agencia. Intente de nuevo.'))
@@ -220,14 +199,10 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
         consultarExistente(data.agencia_id, mes);
     };
 
-    // Llegando desde una actividad: se cargan su departamento, agencia y mes
+    // Llegando desde una actividad: se cargan su regional, agencia y mes
     useEffect(() => {
         if (!inicial) return;
-        cambiarDepartamento(inicial.departamento_id).then((lista) => {
-            const agencia = lista.find((a) => a.codigo === inicial.agencia_id);
-            if (agencia) setData((prev) => ({ ...prev, regional: agencia.regional }));
-            cambiarAgencia(inicial.agencia_id, inicial.mes);
-        });
+        cambiarRegional(inicial.regional).then(() => cambiarAgencia(inicial.agencia_id, inicial.mes));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir la página
     }, []);
 
@@ -280,11 +255,9 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
 
         // Solo los campos que espera el servidor (sin nombres ni referencias de productos)
         transform((d) => ({
-            departamento_id: d.departamento_id,
             regional: d.regional,
             agencia_id: d.agencia_id,
             mes: d.mes,
-            coor_nacional_id: d.coor_nacional_id,
             coor_regional_id: d.coor_regional_id,
             responsable_id: d.responsable_id,
             actividades: d.actividades.map((a) => ({
@@ -317,24 +290,10 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                 {errorCarga && <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{errorCarga}</p>}
 
                 <Seccion titulo="Información general">
-                    <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <Campo etiqueta="Departamento" obligatorio error={errores.departamento_id}>
-                            <SelectBuscable
-                                opciones={departamentos.map((d) => ({ valor: String(d.id), etiqueta: d.nombre }))}
-                                valor={data.departamento_id}
-                                onChange={cambiarDepartamento}
-                                conError={!!errores.departamento_id}
-                            />
-                        </Campo>
-
+                    <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Campo etiqueta="Regional" obligatorio error={errores.regional}>
-                            <select
-                                value={data.regional}
-                                onChange={(e) => cambiarRegional(e.target.value)}
-                                disabled={!data.departamento_id || cargando === 'agencias'}
-                                className={inputClass}
-                            >
-                                <option value="">{cargando === 'agencias' ? 'Cargando...' : data.departamento_id ? 'SELECCIONE' : 'Seleccione el departamento'}</option>
+                            <select value={data.regional} onChange={(e) => cambiarRegional(e.target.value)} className={inputClass}>
+                                <option value="">SELECCIONE</option>
                                 {regionales.map((r) => (
                                     <option key={r} value={r}>
                                         {r}
@@ -345,11 +304,11 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
 
                         <Campo etiqueta="Agencia" obligatorio error={errores.agencia_id}>
                             <SelectBuscable
-                                opciones={agenciasDeRegional.map((a) => ({ valor: a.codigo, etiqueta: a.nombre }))}
+                                opciones={agencias.map((a) => ({ valor: a.codigo, etiqueta: a.nombre }))}
                                 valor={data.agencia_id}
                                 onChange={(codigo) => cambiarAgencia(codigo)}
-                                placeholder={cargando === 'agencia' ? 'Cargando...' : data.regional ? 'SELECCIONE' : 'Seleccione la regional'}
-                                disabled={!data.regional}
+                                placeholder={cargando === 'agencias' ? 'Cargando...' : data.regional ? 'SELECCIONE' : 'Seleccione la regional'}
+                                disabled={!data.regional || cargando === 'agencias'}
                                 conError={!!errores.agencia_id}
                             />
                         </Campo>
@@ -382,10 +341,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
 
                 {existente ? (
                     <Seccion titulo="Responsables (de la programación existente)">
-                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                            <Campo etiqueta="Coordinador nacional">
-                                <input value={existente.coorNacional.nombre} disabled className={inputClass} />
-                            </Campo>
+                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                             <Campo etiqueta="Coordinador regional">
                                 <input value={existente.coorRegional.nombre} disabled className={inputClass} />
                             </Campo>
@@ -396,16 +352,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                     </Seccion>
                 ) : (
                     <Seccion titulo="Responsables">
-                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                            <Campo etiqueta="Coordinador nacional" obligatorio error={errores.coor_nacional_id}>
-                                <SelectBuscable
-                                    opciones={coordinadoresNacionales.map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
-                                    valor={data.coor_nacional_id}
-                                    onChange={(v) => setData('coor_nacional_id', v)}
-                                    conError={!!errores.coor_nacional_id}
-                                />
-                            </Campo>
-    
+                        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                             <Campo etiqueta="Coordinador regional" obligatorio error={errores.coor_regional_id}>
                                 <SelectBuscable
                                     opciones={(datosAgencia?.coordinadoresRegionales ?? []).map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
@@ -419,7 +366,7 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                                     <p className="mt-1 text-xs text-amber-700">La agencia no tiene coordinador regional asignado.</p>
                                 )}
                             </Campo>
-    
+
                             <Campo etiqueta="Responsable" obligatorio error={errores.responsable_id}>
                                 <SelectBuscable
                                     opciones={responsables.map((r) => ({ valor: r.coduser, etiqueta: r.nombre }))}
@@ -441,6 +388,12 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                     titulo="Actividades del mes"
                     acciones={<span className="text-xs font-medium text-blue-700">{data.actividades.length} actividad(es) agregada(s)</span>}
                 >
+                    {datosAgencia?.municipiosOrigen === 'departamento' && (
+                        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            La agencia no tiene correrías registradas; se muestran los municipios de su departamento.
+                        </p>
+                    )}
+
                     {/* Agregar: fecha + tipo */}
                     <div className="grid gap-3 rounded-lg border border-dashed border-blue-200 bg-blue-50/40 p-3 sm:grid-cols-[180px_1fr_auto] sm:items-end">
                         <Campo etiqueta="Fecha actividad" obligatorio>
@@ -491,7 +444,6 @@ export default function Create({ departamentos, tipos, checklist, asesores, coor
                                     error={(campo) => errores[`actividades.${i}.${campo}`]}
                                     tipos={tipos}
                                     checklist={checklist}
-                                    asesores={asesores}
                                     datosAgencia={datosAgencia}
                                     agenciaSeleccionada={!!data.agencia_id}
                                     onChange={(cambios) => actualizarActividad(actividad.fecha, cambios)}
@@ -524,7 +476,6 @@ interface TarjetaActividadProps {
     error: (campo: string) => string | undefined;
     tipos: Item[];
     checklist: Item[];
-    asesores: Item[];
     datosAgencia: DatosAgencia | null;
     agenciaSeleccionada: boolean;
     onChange: (cambios: Partial<ActividadForm>) => void;
@@ -532,7 +483,7 @@ interface TarjetaActividadProps {
 }
 
 // Una actividad agregada: fecha fija, tipo y municipio editables, y su detalle (productos, asesores, checklist)
-function TarjetaActividad({ actividad, error, tipos, checklist, asesores, datosAgencia, agenciaSeleccionada, onChange, onQuitar }: TarjetaActividadProps) {
+function TarjetaActividad({ actividad, error, tipos, checklist, datosAgencia, agenciaSeleccionada, onChange, onQuitar }: TarjetaActividadProps) {
     const [fecha, diaSemana] = formatearFecha(actividad.fecha);
 
     return (
@@ -594,7 +545,8 @@ function TarjetaActividad({ actividad, error, tipos, checklist, asesores, datosA
                     mensajeInventario={
                         !agenciaSeleccionada ? 'Seleccione la agencia para ver su inventario.' : (datosAgencia?.inventarioError ?? 'Cargando inventario...')
                     }
-                    asesores={asesores}
+                    asesores={datosAgencia?.asesores ?? []}
+                    mensajeAsesores={!agenciaSeleccionada ? 'Seleccione la agencia para ver sus asesores.' : undefined}
                     checklist={checklist}
                     error={error}
                 />

@@ -10,7 +10,7 @@ import Seccion from '@/components/Seccion';
 import SelectBuscable from '@/components/SelectBuscable';
 import { useCan } from '@/hooks/useCan';
 import AppLayout from '@/layouts/AppLayout';
-import { DetalleDia, Item, ProductoInventario } from '@/types/actividades';
+import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
 import { url } from '@/lib/url';
 
 interface Props {
@@ -27,7 +27,6 @@ interface Props {
         agencia: string;
         regional: string;
         mes: string;
-        coorNacional: string;
         coorRegional: string;
         responsable: string;
     };
@@ -35,7 +34,7 @@ interface Props {
     editable: boolean;
     tipos: Item[];
     checklist: Item[];
-    asesores: Item[];
+    asesores: Persona[];
     municipios: Item[];
     inventario: ProductoInventario[];
     inventarioError: string | null;
@@ -107,7 +106,6 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                         <Dato etiqueta="Agencia" valor={programacion.agencia} />
                         <Dato etiqueta="Regional" valor={programacion.regional} />
                         <Dato etiqueta="Mes" valor={programacion.mes} />
-                        <Dato etiqueta="Coordinador nacional" valor={programacion.coorNacional} />
                         <Dato etiqueta="Coordinador regional" valor={programacion.coorRegional} />
                         <Dato etiqueta="Responsable" valor={programacion.responsable} />
                     </div>

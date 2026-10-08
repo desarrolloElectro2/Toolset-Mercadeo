@@ -8,18 +8,15 @@ use App\Models\ActividadProgramacion;
 use App\Models\ActividadTipo;
 use App\Models\Agencia;
 use App\Models\ChecklistItem;
-use App\Models\Ciudad;
-use App\Models\Departamento;
 use App\Models\Rol;
 use App\Models\Usuario;
-use App\Models\Vendedor;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
-// Programación mensual de actividades de mercadeo por agencia
+// Programación mensual de actividades de mercadeo por agencia (Regional -> Agencia -> Mes)
 class ProgramacionActividadService
 {
     public function __construct(
@@ -30,21 +27,19 @@ class ProgramacionActividadService
 
     /**
      * Datos fijos del formulario (no dependen de la agencia).
-     * $programacion: si se llega desde una actividad, el formulario abre con su departamento, agencia y mes.
+     * $programacion: si se llega desde una actividad, el formulario abre con su regional, agencia y mes.
      */
     public function datosFormulario(?ActividadProgramacion $programacion = null): array
     {
         return [
-            'departamentos'          => $this->departamentosConAgencias(),
-            'tipos'                  => ActividadTipo::query()->where('activo', 1)->orderBy('nombre')->get(['id', 'nombre']),
-            'checklist'              => ChecklistItem::query()->where('activo', 1)->orderBy('id')->get(['id', 'nombre']),
-            'asesores'               => $this->asesores(),
-            'coordinadoresNacionales' => $this->coordinadores('COORDINADOR_NACIONAL'),
-            'responsables'           => $this->responsables(),
-            'inicial'                => $programacion ? [
-                'departamento_id' => (string) $programacion->departamento_id,
-                'agencia_id'      => $programacion->agencia_id,
-                'mes'             => sprintf('%04d-%02d', $programacion->anio, $programacion->mes),
+            'regionales'   => $this->regionales(),
+            'tipos'        => ActividadTipo::query()->where('activo', 1)->orderBy('nombre')->get(['id', 'nombre']),
+            'checklist'    => ChecklistItem::query()->where('activo', 1)->orderBy('id')->get(['id', 'nombre']),
+            'responsables' => $this->responsables(),
+            'inicial'      => $programacion ? [
+                'regional'   => $programacion->regional,
+                'agencia_id' => $programacion->agencia_id,
+                'mes'        => sprintf('%04d-%02d', $programacion->anio, $programacion->mes),
             ] : null,
         ];
     }
@@ -68,12 +63,11 @@ class ProgramacionActividadService
         }
 
         $nombres = Usuario::query()
-            ->whereIn('coduser', [$programacion->coor_nacional_id, $programacion->coor_regional_id, $programacion->responsable_id])
+            ->whereIn('coduser', [$programacion->coor_regional_id, $programacion->responsable_id])
             ->pluck('nombre', 'coduser');
 
         return [
             'id'           => $programacion->id,
-            'coorNacional' => ['coduser' => $programacion->coor_nacional_id, 'nombre' => $nombres[$programacion->coor_nacional_id] ?? $programacion->coor_nacional_id],
             'coorRegional' => ['coduser' => $programacion->coor_regional_id, 'nombre' => $nombres[$programacion->coor_regional_id] ?? $programacion->coor_regional_id],
             'responsable'  => ['coduser' => $programacion->responsable_id, 'nombre' => $nombres[$programacion->responsable_id] ?? $programacion->responsable_id],
             // Fechas que ya tienen actividad: no se pueden volver a usar
@@ -81,30 +75,32 @@ class ProgramacionActividadService
         ];
     }
 
-    // Agencias activas de un departamento, con su regional (el formulario filtra Departamento -> Regional -> Agencia)
-    public function agenciasDeDepartamento(int $departamentoId): array
+    // Agencias activas de una regional
+    public function agenciasDeRegional(string $regional): array
     {
         return Agencia::query()
             ->where('activo', 1)
-            ->where('departamento_id', $departamentoId)
+            ->where('agenreg', $regional)
             ->orderBy('agennom')
-            ->get(['codagen', 'agennom', 'agenreg'])
-            ->map(fn (Agencia $a) => ['codigo' => $a->codagen, 'nombre' => $a->agennom, 'regional' => (string) $a->agenreg])
+            ->get(['codagen', 'agennom'])
+            ->map(fn (Agencia $a) => ['codigo' => $a->codagen, 'nombre' => $a->agennom])
             ->all();
     }
 
-    // Datos que dependen de la agencia: regional, coordinador regional, municipios e inventario
+    // Datos que dependen de la agencia: coordinador regional, municipios, asesores e inventario
     public function datosAgencia(string $codagen): array
     {
         $agencia = Agencia::query()->where('activo', 1)->findOrFail($codagen);
         $inventario = $this->inventarioService->productosDeAgencia($agencia);
+        $municipios = $this->detalleService->municipiosDeAgencia($agencia);
 
         return [
-            'regional'              => (string) $agencia->agenreg,
             'coordinadoresRegionales' => $this->coordinadores('COORDINADOR_COMERCIAL', $agencia->codagen),
-            'municipios'            => $this->municipios((int) $agencia->departamento_id),
-            'inventario'            => $inventario ?? [],
-            'inventarioError'       => $inventario === null
+            'municipios'              => $municipios['municipios'],
+            'municipiosOrigen'        => $municipios['origen'], // 'correrias' | 'departamento'
+            'asesores'                => $this->detalleService->asesoresDeAgencia($agencia->codagen),
+            'inventario'              => $inventario ?? [],
+            'inventarioError'         => $inventario === null
                 ? 'No se pudo consultar el inventario en Manager. Intente de nuevo en unos minutos.'
                 : null,
         ];
@@ -123,14 +119,11 @@ class ProgramacionActividadService
         $agencia = Agencia::query()->where('activo', 1)->find($datos['agencia_id']);
         [$anio, $mes] = array_map('intval', explode('-', $datos['mes']));
 
-        if ($agencia === null || (int) $agencia->departamento_id !== (int) $datos['departamento_id']) {
-            throw ValidationException::withMessages(['agencia_id' => 'La agencia no es válida para el departamento seleccionado.']);
-        }
-        if ((string) $agencia->agenreg !== $datos['regional']) {
+        if ($agencia === null || (string) $agencia->agenreg !== $datos['regional']) {
             throw ValidationException::withMessages(['agencia_id' => 'La agencia no pertenece a la regional seleccionada.']);
         }
 
-        $existente =ActividadProgramacion::query()
+        $existente = ActividadProgramacion::query()
             ->where('agencia_id', $agencia->codagen)->where('anio', $anio)->where('mes', $mes)->first();
 
         $catalogos = $this->detalleService->catalogos($agencia);
@@ -145,12 +138,12 @@ class ProgramacionActividadService
                 $programacion->save();
             } else {
                 $programacion = new ActividadProgramacion();
-                $programacion->departamento_id  = (int) $datos['departamento_id'];
+                $programacion->departamento_id  = (int) $agencia->departamento_id; // se toma de la agencia
                 $programacion->agencia_id       = $agencia->codagen;
                 $programacion->regional         = (string) $agencia->agenreg;
                 $programacion->anio             = $anio;
                 $programacion->mes              = $mes;
-                $programacion->coor_nacional_id = $datos['coor_nacional_id'];
+                $programacion->coor_nacional_id = null; // ya no se pide en el formulario
                 $programacion->coor_regional_id = $datos['coor_regional_id'];
                 $programacion->responsable_id   = $datos['responsable_id'];
                 $programacion->user_new         = $coduser;
@@ -193,23 +186,19 @@ class ProgramacionActividadService
     private function validarBasico(Request $request): array
     {
         $validator = Validator::make($request->all(), [
-            'departamento_id'     => ['required', 'integer'],
             'regional'            => ['required', 'string', 'max:10'],
             'agencia_id'          => ['required', 'string', 'max:6'],
             'mes'                 => ['required', 'date_format:Y-m'],
-            'coor_nacional_id'    => ['required', 'string', 'max:7'],
             'coor_regional_id'    => ['required', 'string', 'max:7'],
             'responsable_id'      => ['required', 'string', 'max:7'],
             'actividades'         => ['required', 'array', 'min:1'],
             'actividades.*.fecha' => ['required', 'date_format:Y-m-d', 'distinct'],
             ...$this->detalleService->reglasDia('actividades.*'),
         ], [
-            'departamento_id.required'     => 'Seleccione el departamento.',
             'regional.required'            => 'Seleccione la regional.',
             'agencia_id.required'          => 'Seleccione la agencia.',
             'mes.required'                 => 'Seleccione el mes.',
             'mes.date_format'              => 'El mes no es válido.',
-            'coor_nacional_id.required'    => 'Seleccione el coordinador nacional.',
             'coor_regional_id.required'    => 'Seleccione el coordinador regional.',
             'responsable_id.required'      => 'Seleccione el responsable.',
             'actividades.required'         => 'Diligencie al menos un día con actividad.',
@@ -237,9 +226,6 @@ class ProgramacionActividadService
 
         // Programación nueva: se validan sus responsables. Si ya existe, conserva los suyos.
         if ($existente === null) {
-            if (! collect($this->coordinadores('COORDINADOR_NACIONAL'))->contains('coduser', $datos['coor_nacional_id'])) {
-                $errores['coor_nacional_id'] = 'El coordinador nacional no es válido.';
-            }
             if (! collect($this->coordinadores('COORDINADOR_COMERCIAL', $agencia->codagen))->contains('coduser', $datos['coor_regional_id'])) {
                 $errores['coor_regional_id'] = 'El coordinador regional no corresponde a la agencia.';
             }
@@ -279,25 +265,11 @@ class ProgramacionActividadService
             ->all();
     }
 
-    // Departamentos que tienen al menos una agencia activa
-    private function departamentosConAgencias(): array
+    // Regionales que tienen al menos una agencia activa
+    private function regionales(): array
     {
-        $ids = Agencia::query()->where('activo', 1)->whereNotNull('departamento_id')
-            ->where('departamento_id', '<>', 0)->distinct()->pluck('departamento_id');
-
-        return Departamento::query()->whereIn('id', $ids)->orderBy('departamento')
-            ->get(['id', 'departamento'])
-            ->map(fn (Departamento $d) => ['id' => $d->id, 'nombre' => $d->departamento])
-            ->all();
-    }
-
-    // Municipios del departamento de la agencia
-    public function municipios(int $departamentoId): array
-    {
-        return Ciudad::query()->where('departamento', $departamentoId)->orderBy('ciudad')
-            ->get(['id', 'ciudad'])
-            ->map(fn (Ciudad $c) => ['id' => $c->id, 'nombre' => $c->ciudad])
-            ->all();
+        return Agencia::query()->where('activo', 1)->whereNotNull('agenreg')->where('agenreg', '<>', '')
+            ->distinct()->orderBy('agenreg')->pluck('agenreg')->all();
     }
 
     // Coordinadores según el perfil de toolset_perf.roles (mismo criterio que Correrías en admin)
@@ -325,15 +297,6 @@ class ProgramacionActividadService
             ->orderBy('nombre')
             ->get(['coduser', 'nombre'])
             ->map(fn (Usuario $u) => ['coduser' => $u->coduser, 'nombre' => $u->nombre])
-            ->all();
-    }
-
-    // Asesores de interelec activos
-    public function asesores(): array
-    {
-        return Vendedor::query()->where('activo', 1)->orderBy('nombre')
-            ->get(['id', 'nombre'])
-            ->map(fn (Vendedor $v) => ['id' => $v->id, 'nombre' => $v->nombre])
             ->all();
     }
 }

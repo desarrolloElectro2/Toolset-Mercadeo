@@ -1,7 +1,7 @@
 import { inputClass } from '@/components/Campo';
 import SelectBuscable from '@/components/SelectBuscable';
 import SelectMultiple from '@/components/SelectMultiple';
-import { DetalleDia, Item, ProductoInventario } from '@/types/actividades';
+import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
 
 interface Props {
     valor: DetalleDia;
@@ -10,7 +10,10 @@ interface Props {
     inventario: ProductoInventario[] | null;
     /** Texto que se muestra cuando no hay inventario para buscar */
     mensajeInventario?: string | null;
-    asesores: Item[];
+    /** Asesores (perfil ASESOR de toolset_perf) de la agencia */
+    asesores: Persona[];
+    /** Texto que se muestra en lugar del selector de asesores (ej. sin agencia) */
+    mensajeAsesores?: string;
     checklist: Item[];
     error: (campo: string) => string | undefined;
     soloLectura?: boolean;
@@ -23,7 +26,17 @@ const IconoQuitar = () => (
 );
 
 /** Productos (inventario Manager), asesores y checklist de una actividad. Se usa al crear y al editar. */
-export default function DetalleActividad({ valor, onChange, inventario, mensajeInventario, asesores, checklist, error, soloLectura = false }: Props) {
+export default function DetalleActividad({
+    valor,
+    onChange,
+    inventario,
+    mensajeInventario,
+    asesores,
+    mensajeAsesores,
+    checklist,
+    error,
+    soloLectura = false,
+}: Props) {
     const agregados = valor.productos.map((p) => p.producto);
 
     const agregarProducto = (codigo: string) => {
@@ -111,25 +124,30 @@ export default function DetalleActividad({ valor, onChange, inventario, mensajeI
                 )}
             </div>
 
-            {/* Asesores de interelec */}
+            {/* Asesores de la agencia (perfil ASESOR en toolset_perf) */}
             <div>
                 <p className="mb-1.5 text-xs font-medium text-slate-500">Asesores</p>
                 {soloLectura ? (
                     <div className="flex flex-wrap gap-1.5">
                         {valor.asesores.length === 0 && <p className="text-sm text-slate-400">Sin asesores.</p>}
-                        {valor.asesores.map((id) => (
-                            <span key={id} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-700">
-                                {asesores.find((a) => String(a.id) === id)?.nombre ?? id}
+                        {valor.asesores.map((coduser) => (
+                            <span key={coduser} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-700">
+                                {asesores.find((a) => a.coduser === coduser)?.nombre ?? coduser}
                             </span>
                         ))}
                     </div>
+                ) : mensajeAsesores ? (
+                    <p className="text-xs text-slate-400">{mensajeAsesores}</p>
                 ) : (
-                    <SelectMultiple
-                        opciones={asesores.map((a) => ({ valor: String(a.id), etiqueta: a.nombre }))}
-                        valores={valor.asesores}
-                        onChange={(valores) => onChange({ asesores: valores })}
-                        placeholder="Agregar asesor..."
-                    />
+                    <>
+                        <SelectMultiple
+                            opciones={asesores.map((a) => ({ valor: a.coduser, etiqueta: a.nombre }))}
+                            valores={valor.asesores}
+                            onChange={(valores) => onChange({ asesores: valores })}
+                            placeholder="Agregar asesor..."
+                        />
+                        {asesores.length === 0 && <p className="mt-1 text-xs text-amber-700">La agencia no tiene asesores asignados.</p>}
+                    </>
                 )}
                 {error('asesores') && <p className="mt-1 text-xs text-red-600">{error('asesores')}</p>}
             </div>

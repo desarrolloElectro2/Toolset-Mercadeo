@@ -37,6 +37,12 @@ class EjecucionActividadController extends Controller
         );
     }
 
+    // Archivo de finalización: foto o PDF (ruta protegida; está en el disco del servidor)
+    public function archivoFin(Actividad $actividad)
+    {
+        return $this->ejecucionService->archivoFin($actividad);
+    }
+
     // Foto de inicio (ruta protegida; el archivo está en el disco del servidor)
     public function foto(Actividad $actividad)
     {

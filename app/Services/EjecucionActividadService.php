@@ -57,13 +57,14 @@ class EjecucionActividadService
         }
     }
 
-    // Hora de fin (posterior a la de inicio) => Finalizada
+    // Hora de fin (posterior a la de inicio) + archivo obligatorio (foto o PDF) => Finalizada
     public function finalizar(Request $request, Actividad $actividad): void
     {
         $this->exigirEstado($actividad, [Actividad::EN_PROCESO], 'finalizar');
 
         $datos = $this->validar($request, [
             'hora_fin'      => ['required', 'date_format:H:i'],
+            'archivo_fin'   => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
             'observaciones' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -72,15 +73,26 @@ class EjecucionActividadService
             throw ValidationException::withMessages(['hora_fin' => "La hora de fin debe ser posterior a la hora de inicio ({$inicio})."]);
         }
 
-        DB::connection('mysql')->transaction(function () use ($actividad, $datos, $request) {
-            $actividad->estado        = Actividad::FINALIZADA;
-            $actividad->hora_fin      = $datos['hora_fin'];
-            $actividad->observaciones = $datos['observaciones'] ?? $actividad->observaciones;
-            $actividad->user_update   = (string) $request->user()->coduser;
-            $actividad->save();
+        // Misma carpeta que la foto de inicio: MERCADEO/ACTIVIDADES/{año}/{mes}/{día}/{id}/FIN_...
+        $momento = Carbon::parse($actividad->fecha->format('Y-m-d').' '.$datos['hora_fin']);
+        $rutaArchivo = $this->archivoService->guardar($request->file('archivo_fin'), self::MODULO_ARCHIVOS, $actividad->id, 'FIN', $momento);
 
-            $this->registrarHistorial($actividad, "Actividad finalizada a las {$datos['hora_fin']}", $request);
-        });
+        try {
+            DB::connection('mysql')->transaction(function () use ($actividad, $datos, $rutaArchivo, $request) {
+                $actividad->estado        = Actividad::FINALIZADA;
+                $actividad->hora_fin      = $datos['hora_fin'];
+                $actividad->archivo_fin   = $rutaArchivo;
+                $actividad->observaciones = $datos['observaciones'] ?? $actividad->observaciones;
+                $actividad->user_update   = (string) $request->user()->coduser;
+                $actividad->save();
+
+                $this->registrarHistorial($actividad, "Actividad finalizada a las {$datos['hora_fin']}", $request);
+            });
+        } catch (\Throwable $e) {
+            // Si la BD falla no se deja el archivo huérfano en el disco
+            $this->archivoService->eliminar($rutaArchivo);
+            throw $e;
+        }
     }
 
     // Motivo obligatorio; solo Programadas o En proceso
@@ -99,6 +111,14 @@ class EjecucionActividadService
 
             $this->registrarHistorial($actividad, 'Anulada: '.trim($datos['motivo']), $request);
         });
+    }
+
+    // Archivo de finalización (foto o PDF) desde el disco del servidor
+    public function archivoFin(Actividad $actividad): BinaryFileResponse
+    {
+        abort_unless($actividad->archivo_fin, 404);
+
+        return $this->archivoService->respuesta($actividad->archivo_fin);
     }
 
     // Foto de inicio desde el disco del servidor
@@ -129,6 +149,10 @@ class EjecucionActividadService
             'foto_inicio.mimes'       => 'La foto debe ser JPG o PNG.',
             'foto_inicio.max'         => 'La foto no puede pesar más de 5 MB.',
             'foto_inicio.uploaded'    => 'No se pudo subir la foto; puede que supere el tamaño permitido por el servidor.',
+            'archivo_fin.required'    => 'El archivo de finalización es obligatorio.',
+            'archivo_fin.mimes'       => 'El archivo debe ser JPG, PNG o PDF.',
+            'archivo_fin.max'         => 'El archivo no puede pesar más de 5 MB.',
+            'archivo_fin.uploaded'    => 'No se pudo subir el archivo; puede que supere el tamaño permitido por el servidor.',
             'observaciones.max'       => 'Las observaciones no pueden tener más de 1000 caracteres.',
             'motivo.required'         => 'Escriba el motivo de la anulación.',
             'motivo.min'              => 'El motivo debe tener al menos 5 caracteres.',

@@ -1,10 +1,10 @@
-import type { EventContentArg, EventInput, EventSourceFuncArg } from '@fullcalendar/core';
+import type { EventClickArg, EventContentArg, EventInput, EventSourceFuncArg } from '@fullcalendar/core';
 import esLocale from '@fullcalendar/core/locales/es';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import listPlugin from '@fullcalendar/list';
 import FullCalendar from '@fullcalendar/react';
 import { Head, router } from '@inertiajs/react';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
 import { inputClass } from '@/components/Campo';
 import { IconoActividades } from '@/components/Iconos';
@@ -41,6 +41,18 @@ const COLORES: Record<string, { fondo: string; borde: string; texto: string; eti
     ANULADA: { fondo: '#fee2e2', borde: '#ef4444', texto: '#991b1b', etiqueta: 'Anulada' },
 };
 
+// Opciones fijas fuera del componente: así no cambian en cada render
+const PLUGINS = [dayGridPlugin, listPlugin];
+const BARRA = { left: 'prev,next today', center: 'title', right: 'dayGridMonth,dayGridWeek,dayGridDay,listMonth' };
+const TEXTOS_BOTONES = { today: 'Hoy', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' };
+const textoMas = (n: number) => `+${n} más`;
+
+// Clic en una actividad: abre su pantalla
+function abrirActividad(info: EventClickArg) {
+    info.jsEvent.preventDefault();
+    router.visit(url(`/actividades/${info.event.id}/editar`));
+}
+
 // FullCalendar trabaja con Date; al servidor se envían fechas locales "YYYY-MM-DD"
 const aFechaLocal = (fecha: Date) =>
     `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
@@ -59,8 +71,10 @@ export default function Calendario({ opciones }: Props) {
         calendario.current?.getApi().refetchEvents();
     };
 
-    // Pide al servidor solo las actividades del rango visible
-    const cargarEventos = async (rango: EventSourceFuncArg): Promise<EventInput[]> => {
+    // Pide al servidor solo las actividades del rango visible.
+    // useCallback: debe ser SIEMPRE la misma función; si cambiara en cada render, FullCalendar la tomaría
+    // como otra fuente de eventos y volvería a pedirlos sin fin (se queda en "Cargando…").
+    const cargarEventos = useCallback(async (rango: EventSourceFuncArg): Promise<EventInput[]> => {
         const params = new URLSearchParams({ inicio: aFechaLocal(rango.start), fin: aFechaLocal(rango.end) });
         Object.entries(filtrosActuales.current).forEach(([clave, valor]) => valor && params.set(clave, valor));
 
@@ -89,7 +103,7 @@ export default function Calendario({ opciones }: Props) {
             setError('No se pudieron cargar las actividades del calendario. Intente de nuevo.');
             return [];
         }
-    };
+    }, []); // lee los filtros desde filtrosActuales (ref), por eso no necesita dependencias
 
     return (
         <AppLayout titulo="Actividades › Calendario" icono={<IconoActividades />}>
@@ -151,21 +165,18 @@ export default function Calendario({ opciones }: Props) {
                 <div className="calendario-actividades">
                     <FullCalendar
                         ref={calendario}
-                        plugins={[dayGridPlugin, listPlugin]}
+                        plugins={PLUGINS}
                         locale={esLocale}
                         initialView="dayGridMonth"
-                        headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,dayGridWeek,dayGridDay,listMonth' }}
-                        buttonText={{ today: 'Hoy', month: 'Mes', week: 'Semana', day: 'Día', list: 'Agenda' }}
+                        headerToolbar={BARRA}
+                        buttonText={TEXTOS_BOTONES}
                         height="auto"
                         dayMaxEvents={4}
-                        moreLinkText={(n) => `+${n} más`}
+                        moreLinkText={textoMas}
                         events={cargarEventos}
                         loading={setCargando}
                         eventContent={contenidoEvento}
-                        eventClick={(info) => {
-                            info.jsEvent.preventDefault();
-                            router.visit(url(`/actividades/${info.event.id}/editar`));
-                        }}
+                        eventClick={abrirActividad}
                     />
                 </div>
             </div>

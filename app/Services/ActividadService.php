@@ -29,7 +29,6 @@ class ActividadService
     public function __construct(
         private InventarioService $inventarioService,
         private DetalleActividadService $detalleService,
-        private ProgramacionActividadService $programacionService,
     ) {
     }
 
@@ -150,14 +149,22 @@ class ActividadService
         $agencia = Agencia::query()->findOrFail($programacion->agencia_id);
         $editable = in_array($actividad->estado, self::ESTADOS_EDITABLES, true);
 
-        $asesoresGuardados = DB::connection('mysql')->table('actividad_asesores')
-            ->where('actividad_id', $actividad->id)->pluck('nombre', 'vendedor_id');
+        $asesoresGuardados = $this->asesoresGuardados($actividad);
 
-        // Asesores activos + los ya guardados (por si alguno quedó inactivo en interelec)
-        $asesores = collect($this->programacionService->asesores());
-        foreach ($asesoresGuardados as $id => $nombre) {
-            if (! $asesores->contains('id', $id)) {
-                $asesores->push(['id' => $id, 'nombre' => $nombre]);
+        // Asesores de la agencia + los ya guardados (por si alguno cambió de agencia o se inactivó)
+        $asesores = collect($this->detalleService->asesoresDeAgencia($agencia->codagen));
+        foreach ($asesoresGuardados as $coduser => $nombre) {
+            if (! $asesores->contains('coduser', (string) $coduser)) {
+                $asesores->push(['coduser' => (string) $coduser, 'nombre' => $nombre]);
+            }
+        }
+
+        // Municipios de la agencia + el que ya tiene la actividad (si dejó de estar en la lista)
+        $municipios = collect($this->detalleService->municipiosDeAgencia($agencia)['municipios']);
+        if (! $municipios->contains('id', (int) $actividad->ciudad_id)) {
+            $actual = Ciudad::query()->find($actividad->ciudad_id);
+            if ($actual) {
+                $municipios->push(['id' => (int) $actual->id, 'nombre' => $actual->ciudad]);
             }
         }
 
@@ -165,7 +172,7 @@ class ActividadService
         $inventario = $editable ? $this->inventarioService->productosDeAgencia($agencia) : [];
 
         $personas = Usuario::query()
-            ->whereIn('coduser', [$programacion->coor_nacional_id, $programacion->coor_regional_id, $programacion->responsable_id])
+            ->whereIn('coduser', [$programacion->coor_regional_id, $programacion->responsable_id])
             ->pluck('nombre', 'coduser');
 
         return [
@@ -181,7 +188,7 @@ class ActividadService
                     'referencia' => $p->referencia,
                     'cantidad'   => (string) $p->cantidad,
                 ]),
-                'asesores'          => $asesoresGuardados->keys()->map(fn ($id) => (string) $id)->values(),
+                'asesores'          => array_map('strval', array_keys($asesoresGuardados)),
                 'checklist'         => DB::connection('mysql')->table('actividad_checklist')
                     ->where('actividad_id', $actividad->id)->pluck('checklist_item_id')->map(fn ($id) => (int) $id),
             ],
@@ -192,7 +199,6 @@ class ActividadService
                 'agencia'      => $agencia->agennom,
                 'regional'     => $programacion->regional,
                 'mes'          => self::MESES[$programacion->mes - 1].' '.$programacion->anio,
-                'coorNacional' => $personas[$programacion->coor_nacional_id] ?? $programacion->coor_nacional_id,
                 'coorRegional' => $personas[$programacion->coor_regional_id] ?? $programacion->coor_regional_id,
                 'responsable'  => $personas[$programacion->responsable_id] ?? $programacion->responsable_id,
             ],
@@ -201,6 +207,10 @@ class ActividadService
                 'horaFin'        => $actividad->hora_fin ? substr($actividad->hora_fin, 0, 5) : null,
                 'observaciones'  => $actividad->observaciones,
                 'tieneFoto'      => (bool) $actividad->foto_inicio,
+                // Archivo de finalización: foto o PDF (el PDF se muestra como enlace, no como miniatura)
+                'archivoFin'     => $actividad->archivo_fin
+                    ? (str_ends_with(strtolower($actividad->archivo_fin), '.pdf') ? 'pdf' : 'imagen')
+                    : null,
                 // Antes de la fecha programada no se puede iniciar
                 'antesDeFecha'   => $actividad->fecha->gt(today()),
                 'motivoAnulacion' => $actividad->estado === Actividad::ANULADA
@@ -211,7 +221,7 @@ class ActividadService
             'tipos'           => ActividadTipo::query()->orderBy('nombre')->get(['id', 'nombre']),
             'checklist'       => ChecklistItem::query()->where('activo', 1)->orderBy('id')->get(['id', 'nombre']),
             'asesores'        => $asesores->sortBy('nombre')->values(),
-            'municipios'      => $this->programacionService->municipios((int) $agencia->departamento_id),
+            'municipios'      => $municipios->sortBy('nombre')->values(),
             'inventario'      => $inventario ?? [],
             'inventarioError' => $inventario === null ? 'No se pudo consultar el inventario en Manager. Intente de nuevo en unos minutos.' : null,
             'historial'       => $this->historial($actividad),
@@ -233,11 +243,13 @@ class ActividadService
 
         $agencia = Agencia::query()->findOrFail($actividad->programacion->agencia_id);
 
-        // Lo que ya estaba guardado sigue siendo válido aunque ya no tenga saldo o el asesor esté inactivo
-        $productosGuardados = $actividad->productos()->get(['producto', 'nombre', 'referencia'])->toArray();
-        $catalogos = $this->detalleService->catalogos($agencia, $productosGuardados);
-        $catalogos['asesores'] += DB::connection('mysql')->table('actividad_asesores')
-            ->where('actividad_id', $actividad->id)->pluck('nombre', 'vendedor_id')->all();
+        // Lo ya guardado sigue siendo válido aunque ya no tenga saldo, el asesor cambie de agencia
+        // o el municipio ya no esté en la lista de la agencia
+        $catalogos = $this->detalleService->catalogos($agencia, [
+            'productos' => $actividad->productos()->get(['producto', 'nombre', 'referencia'])->toArray(),
+            'asesores'  => $this->asesoresGuardados($actividad),
+            'ciudad_id' => $actividad->ciudad_id,
+        ]);
 
         $errores = $this->detalleService->erroresDia($datos, '', $catalogos);
         if ($errores !== []) {
@@ -261,6 +273,13 @@ class ActividadService
             $historial->user_new     = $coduser;
             $historial->save();
         });
+    }
+
+    // coduser => nombre de los asesores guardados en la actividad
+    private function asesoresGuardados(Actividad $actividad): array
+    {
+        return DB::connection('mysql')->table('actividad_asesores')
+            ->where('actividad_id', $actividad->id)->pluck('nombre', 'coduser')->all();
     }
 
     // "Buscar": por ID, nombre de agencia o nombre de municipio

@@ -47,11 +47,15 @@ Route::middleware('auth')->group(function () {
             ->whereNumber('actividad')->middleware('can:act_anular')->name('anular');
         Route::get('/{actividad}/foto-inicio', [EjecucionActividadController::class, 'foto'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('foto');
+        Route::get('/{actividad}/archivo-fin', [EjecucionActividadController::class, 'archivoFin'])
+            ->whereNumber('actividad')->middleware('can:act_list')->name('archivo-fin');
 
         // Programación mensual
         Route::middleware('can:act_create')->group(function () {
             Route::get('/programacion/crear', [ProgramacionActividadController::class, 'create'])->name('programacion.create');
             Route::post('/programacion', [ProgramacionActividadController::class, 'store'])->name('programacion.store');
+            // Si el navegador recarga la dirección del POST (p. ej. tras un error), se vuelve al formulario en vez de un 405
+            Route::get('/programacion', fn () => redirect()->route('actividades.programacion.create'));
 
             // Datos para los selects dependientes (JSON)
             Route::get('/datos/agencias', [ProgramacionActividadController::class, 'agencias'])->name('datos.agencias');

@@ -39,15 +39,15 @@ class ProgramacionActividadController extends Controller
         return redirect()->route('actividades.index')->with('mensaje', $mensaje);
     }
 
-    // JSON: agencias activas del departamento (select dependiente)
+    // JSON: agencias activas de la regional (select dependiente)
     public function agencias(Request $request)
     {
         return response()->json(
-            $this->programacionService->agenciasDeDepartamento((int) $request->query('departamento_id')),
+            $this->programacionService->agenciasDeRegional((string) $request->query('regional')),
         );
     }
 
-    // JSON: regional, coordinador regional, municipios e inventario de la agencia
+    // JSON: coordinador regional, municipios, asesores e inventario de la agencia
     public function datosAgencia(string $codagen)
     {
         return response()->json($this->programacionService->datosAgencia($codagen));
