@@ -1,13 +1,13 @@
-const estilos: Record<string, { etiqueta: string; clase: string }> = {
-    PROGRAMADA: { etiqueta: 'Programada', clase: 'bg-blue-100 text-blue-700' },
-    EN_PROCESO: { etiqueta: 'En proceso', clase: 'bg-amber-100 text-amber-800' },
-    FINALIZADA: { etiqueta: 'Finalizada', clase: 'bg-green-100 text-green-700' },
-    ANULADA: { etiqueta: 'Anulada', clase: 'bg-red-100 text-red-700' },
-};
+import { colorEstado } from '@/lib/coloresEstado';
+import { EstadoCatalogo } from '@/types/actividades';
 
-/** Etiqueta de color según el estado de la actividad. */
-export default function EstadoActividad({ estado }: { estado: string }) {
-    const estilo = estilos[estado] ?? { etiqueta: estado, clase: 'bg-slate-100 text-slate-600' };
+/** Etiqueta de color según el estado de la actividad (nombre y color salen de la matriz de estados). */
+export default function EstadoActividad({ estado, estados }: { estado: string; estados: EstadoCatalogo[] }) {
+    const definicion = estados.find((e) => e.codigo === estado);
 
-    return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${estilo.clase}`}>{estilo.etiqueta}</span>;
+    return (
+        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${colorEstado(definicion?.color).clase}`}>
+            {definicion?.nombre ?? estado}
+        </span>
+    );
 }

@@ -22,6 +22,8 @@ class ProgramacionActividadService
     public function __construct(
         private InventarioService $inventarioService,
         private DetalleActividadService $detalleService,
+        private EstadoActividadService $estadoService,
+        private ResponsableAgenciaService $responsableService,
     ) {
     }
 
@@ -34,8 +36,10 @@ class ProgramacionActividadService
         return [
             'regionales'   => $this->regionales(),
             'tipos'        => ActividadTipo::query()->where('activo', 1)->orderBy('nombre')->get(['id', 'nombre']),
-            'checklist'    => ChecklistItem::query()->where('activo', 1)->orderBy('id')->get(['id', 'nombre']),
-            'responsables' => $this->responsables(),
+            'checklist'    => ChecklistItem::query()->where('activo', 1)->orderBy('orden')->orderBy('id')->get(['id', 'nombre']),
+            'responsables' => $this->responsables(), // responsable mercadeo
+            'tiposResponsable' => $this->responsableService->tipos(),
+            'gruposAsesores'   => $this->detalleService->gruposAsesores(), // tipo de actividad => asesores de Manager ('planta' | 'externos')
             'inicial'      => $programacion ? [
                 'regional'   => $programacion->regional,
                 'agencia_id' => $programacion->agencia_id,
@@ -65,11 +69,12 @@ class ProgramacionActividadService
         $nombres = Usuario::query()
             ->whereIn('coduser', [$programacion->coor_regional_id, $programacion->responsable_id])
             ->pluck('nombre', 'coduser');
+        $persona = fn (?string $coduser) => $coduser ? ['coduser' => $coduser, 'nombre' => $nombres[$coduser] ?? $coduser] : null;
 
         return [
-            'id'           => $programacion->id,
-            'coorRegional' => ['coduser' => $programacion->coor_regional_id, 'nombre' => $nombres[$programacion->coor_regional_id] ?? $programacion->coor_regional_id],
-            'responsable'  => ['coduser' => $programacion->responsable_id, 'nombre' => $nombres[$programacion->responsable_id] ?? $programacion->responsable_id],
+            'id'                 => $programacion->id,
+            'coorRegional'       => $persona($programacion->coor_regional_id),
+            'responsable'        => $persona($programacion->responsable_id), // responsable mercadeo
             // Fechas que ya tienen actividad: no se pueden volver a usar
             'fechas'       => $this->fechasOcupadas($programacion),
         ];
@@ -93,12 +98,23 @@ class ProgramacionActividadService
         $agencia = Agencia::query()->where('activo', 1)->findOrFail($codagen);
         $inventario = $this->inventarioService->productosDeAgencia($agencia);
         $municipios = $this->detalleService->municipiosDeAgencia($agencia);
+        $responsables = $this->responsableService->porAgencia($agencia);
+        $asesoresManager = $this->detalleService->asesoresManager($agencia); // misma consulta a Manager
 
         return [
             'coordinadoresRegionales' => $this->coordinadores('COORDINADOR_COMERCIAL', $agencia->codagen),
             'municipios'              => $municipios['municipios'],
             'municipiosOrigen'        => $municipios['origen'], // 'correrias' | 'departamento'
             'asesores'                => $this->detalleService->asesoresDeAgencia($agencia->codagen),
+            // Asesores de Manager por grupo (actividades en agencia y en correría); null = Manager no respondió
+            'asesoresManager'         => $asesoresManager,
+            'asesoresManagerError'    => in_array(null, $asesoresManager, true)
+                ? 'No se pudieron consultar los asesores en Manager. Intente de nuevo en unos minutos.'
+                : null,
+            'responsablesAgencia'     => $responsables ?? [], // tipo => empleados de Manager
+            'responsablesError'       => $responsables === null
+                ? 'No se pudieron consultar los responsables en Manager. Intente de nuevo en unos minutos.'
+                : null,
             'inventario'              => $inventario ?? [],
             'inventarioError'         => $inventario === null
                 ? 'No se pudo consultar el inventario en Manager. Intente de nuevo en unos minutos.'
@@ -130,8 +146,9 @@ class ProgramacionActividadService
         $this->validarNegocio($datos, $agencia, $anio, $mes, $catalogos, $existente);
 
         $coduser = (string) $request->user()->coduser;
+        $estadoInicial = $this->estadoService->codigoInicial(); // estado con el que se crean (matriz de estados)
 
-        $programacion = DB::connection('mysql')->transaction(function () use ($datos, $agencia, $anio, $mes, $catalogos, $coduser, $existente) {
+        $programacion = DB::connection('mysql')->transaction(function () use ($datos, $agencia, $anio, $mes, $catalogos, $coduser, $existente, $estadoInicial) {
             if ($existente !== null) {
                 $programacion = $existente;
                 $programacion->user_update = $coduser;
@@ -145,7 +162,7 @@ class ProgramacionActividadService
                 $programacion->mes              = $mes;
                 $programacion->coor_nacional_id = null; // ya no se pide en el formulario
                 $programacion->coor_regional_id = $datos['coor_regional_id'];
-                $programacion->responsable_id   = $datos['responsable_id'];
+                $programacion->responsable_id   = $datos['responsable_id']; // responsable mercadeo
                 $programacion->user_new         = $coduser;
                 $programacion->user_update      = $coduser;
                 $programacion->save();
@@ -157,7 +174,8 @@ class ProgramacionActividadService
                 $actividad->fecha             = $dia['fecha'];
                 $actividad->actividad_tipo_id = (int) $dia['actividad_tipo_id'];
                 $actividad->ciudad_id         = (int) $dia['ciudad_id'];
-                $actividad->estado            = Actividad::PROGRAMADA;
+                $actividad->estado            = $estadoInicial;
+                $this->detalleService->asignarResponsable($actividad, $dia);
                 $actividad->user_new          = $coduser;
                 $actividad->user_update       = $coduser;
                 $actividad->save();
@@ -166,7 +184,7 @@ class ProgramacionActividadService
 
                 $historial = new ActividadHistorial();
                 $historial->actividad_id = $actividad->id;
-                $historial->estado       = Actividad::PROGRAMADA;
+                $historial->estado       = $estadoInicial;
                 $historial->observacion  = $existente !== null ? 'Actividad agregada a la programación del mes' : 'Actividad programada';
                 $historial->user_new     = $coduser;
                 $historial->save();
@@ -200,7 +218,7 @@ class ProgramacionActividadService
             'mes.required'                 => 'Seleccione el mes.',
             'mes.date_format'              => 'El mes no es válido.',
             'coor_regional_id.required'    => 'Seleccione el coordinador regional.',
-            'responsable_id.required'      => 'Seleccione el responsable.',
+            'responsable_id.required'      => 'Seleccione el responsable mercadeo.',
             'actividades.required'         => 'Diligencie al menos un día con actividad.',
             'actividades.min'              => 'Diligencie al menos un día con actividad.',
             'actividades.*.fecha.distinct' => 'La fecha está repetida.',
@@ -230,7 +248,7 @@ class ProgramacionActividadService
                 $errores['coor_regional_id'] = 'El coordinador regional no corresponde a la agencia.';
             }
             if (! collect($this->responsables())->contains('coduser', $datos['responsable_id'])) {
-                $errores['responsable_id'] = 'El responsable no es válido.';
+                $errores['responsable_id'] = 'El responsable mercadeo no es válido.';
             }
         }
 

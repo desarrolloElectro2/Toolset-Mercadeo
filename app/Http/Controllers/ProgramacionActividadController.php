@@ -30,11 +30,15 @@ class ProgramacionActividadController extends Controller
     // Guarda la programación nueva, o agrega las actividades a la existente del mes
     public function store(Request $request)
     {
-        $resultado = $this->programacionService->crear($request);
+        try {
+            $resultado = $this->programacionService->crear($request);
+        } catch (\DomainException $e) {
+            return back()->with('alerta', $e->getMessage());
+        }
 
         $mensaje = $resultado['existente']
             ? "Se agregaron {$resultado['creadas']} actividad(es) a la programación del mes."
-            : "Programación creada con {$resultado['creadas']} actividad(es) en estado Programada.";
+            : "Programación creada con {$resultado['creadas']} actividad(es).";
 
         return redirect()->route('actividades.index')->with('mensaje', $mensaje);
     }

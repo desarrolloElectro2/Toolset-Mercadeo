@@ -3,6 +3,9 @@ import { FormEvent } from 'react';
 import DetalleActividad from '@/components/actividades/DetalleActividad';
 import EjecucionActividad, { DatosEjecucion } from '@/components/actividades/EjecucionActividad';
 import EstadoActividad from '@/components/actividades/EstadoActividad';
+import EvidenciasActividad, { Evidencia } from '@/components/actividades/EvidenciasActividad';
+import ProspectosActividad, { ProspectosDelDia } from '@/components/actividades/ProspectosActividad';
+import ResponsableEvento from '@/components/actividades/ResponsableEvento';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
 import Campo, { inputClass } from '@/components/Campo';
 import { IconoActividades } from '@/components/Iconos';
@@ -10,7 +13,7 @@ import Seccion from '@/components/Seccion';
 import SelectBuscable from '@/components/SelectBuscable';
 import { useCan } from '@/hooks/useCan';
 import AppLayout from '@/layouts/AppLayout';
-import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
+import { AsesoresManager, DetalleDia, EmpleadoManager, EstadoCatalogo, Item, Persona, ProductoInventario, TITULOS_ASESORES } from '@/types/actividades';
 import { url } from '@/lib/url';
 
 interface Props {
@@ -20,6 +23,8 @@ interface Props {
         estado: string;
         actividad_tipo_id: string;
         ciudad_id: string;
+        tipo_responsable: string;
+        responsable_evento_id: string; // cédula del empleado en Manager
     };
     programacion: {
         id: number;
@@ -28,7 +33,7 @@ interface Props {
         regional: string;
         mes: string;
         coorRegional: string;
-        responsable: string;
+        responsable: string; // responsable mercadeo
     };
     ejecucion: DatosEjecucion;
     editable: boolean;
@@ -39,6 +44,19 @@ interface Props {
     inventario: ProductoInventario[];
     inventarioError: string | null;
     historial: { id: number; estado: string; observacion: string | null; usuario: string; fecha: string | null }[];
+    estados: EstadoCatalogo[];
+    tiposResponsable: { valor: string; nombre: string }[];
+    /** Empleados de Manager por tipo (incluye el guardado); null si Manager no respondió */
+    responsablesAgencia: Record<string, EmpleadoManager[]> | null;
+    responsablesError: string | null;
+    /** Asesores de Manager por grupo (planta / externos; coduser = cédula), incluye los guardados */
+    asesoresManager: AsesoresManager;
+    asesoresManagerError: string | null;
+    /** Id del tipo de actividad => grupo de asesores de Manager; los demás usan toolset_perf */
+    gruposAsesores: Record<string, string>;
+    evidencias: Evidencia[];
+    /** Solo cuando la actividad está finalizada */
+    prospectos: ProspectosDelDia | null;
 }
 
 function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
@@ -50,13 +68,15 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
     );
 }
 
-export default function Edit({ actividad, programacion, ejecucion, editable, tipos, checklist, asesores, municipios, inventario, inventarioError, historial }: Props) {
+export default function Edit({ actividad, programacion, ejecucion, editable, tipos, checklist, asesores, municipios, inventario, inventarioError, historial, estados, tiposResponsable, responsablesAgencia, responsablesError, asesoresManager, asesoresManagerError, gruposAsesores, evidencias, prospectos }: Props) {
     const can = useCan();
     const soloLectura = !editable || !can('act_edit');
 
     const { data, setData, put, processing, errors } = useForm({
         actividad_tipo_id: actividad.actividad_tipo_id,
         ciudad_id: actividad.ciudad_id,
+        tipo_responsable: actividad.tipo_responsable,
+        responsable_evento_id: actividad.responsable_evento_id,
         productos: actividad.productos,
         asesores: actividad.asesores,
         checklist: actividad.checklist,
@@ -66,6 +86,16 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
     const [anio, mes, dia] = actividad.fecha.split('-').map(Number);
     const diaSemana = new Date(anio, mes - 1, dia).toLocaleDateString('es-CO', { weekday: 'long' });
     const fecha = `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`;
+
+    // En agencia y en correría los asesores salen de Manager (planta / externos); en los demás tipos, de toolset_perf
+    const grupo = gruposAsesores[data.actividad_tipo_id];
+    const cambiarTipo = (tipo: string) =>
+        // Al cambiar de lista de asesores se quitan los escogidos (son personas distintas)
+        setData((prev) =>
+            gruposAsesores[tipo] === gruposAsesores[prev.actividad_tipo_id]
+                ? { ...prev, actividad_tipo_id: tipo }
+                : { ...prev, actividad_tipo_id: tipo, asesores: [] },
+        );
 
     const guardar = (e: FormEvent) => {
         e.preventDefault();
@@ -107,11 +137,11 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                         <Dato etiqueta="Regional" valor={programacion.regional} />
                         <Dato etiqueta="Mes" valor={programacion.mes} />
                         <Dato etiqueta="Coordinador regional" valor={programacion.coorRegional} />
-                        <Dato etiqueta="Responsable" valor={programacion.responsable} />
+                        <Dato etiqueta="Responsable mercadeo" valor={programacion.responsable} />
                     </div>
                 </Seccion>
 
-                <Seccion titulo={`Actividad #${actividad.id}`} acciones={<EstadoActividad estado={actividad.estado} />}>
+                <Seccion titulo={`Actividad #${actividad.id}`} acciones={<EstadoActividad estado={actividad.estado} estados={estados} />}>
                     <div className="mb-5 grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Campo etiqueta="Fecha">
                             <input value={`${fecha} · ${diaSemana}`} disabled className={`${inputClass} capitalize`} />
@@ -120,7 +150,7 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                         <Campo etiqueta="Tipo de actividad" obligatorio error={errores.actividad_tipo_id}>
                             <select
                                 value={data.actividad_tipo_id}
-                                onChange={(e) => setData('actividad_tipo_id', e.target.value)}
+                                onChange={(e) => cambiarTipo(e.target.value)}
                                 disabled={soloLectura}
                                 className={inputClass}
                             >
@@ -141,6 +171,17 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                                 conError={!!errores.ciudad_id}
                             />
                         </Campo>
+
+                        <ResponsableEvento
+                            tipos={tiposResponsable}
+                            responsables={responsablesAgencia}
+                            mensaje={responsablesError}
+                            tipo={data.tipo_responsable}
+                            responsable={data.responsable_evento_id}
+                            onChange={(cambios) => setData((prev) => ({ ...prev, ...cambios }))}
+                            error={(campo) => errores[campo]}
+                            soloLectura={soloLectura}
+                        />
                     </div>
 
                     <DetalleActividad
@@ -148,7 +189,9 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                         onChange={(cambios) => setData((prev) => ({ ...prev, ...cambios }))}
                         inventario={inventarioError ? null : inventario}
                         mensajeInventario={inventarioError}
-                        asesores={asesores}
+                        asesores={grupo ? (asesoresManager[grupo] ?? []) : asesores}
+                        tituloAsesores={grupo ? TITULOS_ASESORES[grupo] : 'Asesores'}
+                        mensajeAsesores={grupo && !soloLectura && asesoresManager[grupo] === null ? asesoresManagerError : undefined}
                         checklist={checklist}
                         error={(campo) => errores[campo]}
                         soloLectura={soloLectura}
@@ -177,9 +220,12 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                     estado={actividad.estado}
                     fecha={fecha}
                     ejecucion={ejecucion}
-                    puedeEjecutar={can('act_edit')}
-                    puedeAnular={can('act_anular')}
+                    estados={estados}
                 />
+
+                {prospectos && <ProspectosActividad datos={prospectos} />}
+
+                <EvidenciasActividad actividadId={actividad.id} evidencias={evidencias} puedeCargar={can('act_edit')} />
 
                 <Seccion titulo="Historial">
                     {historial.length === 0 ? (
@@ -199,7 +245,7 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                                     <tr key={h.id} className="border-b border-slate-100 last:border-0">
                                         <td className="py-2 pr-3 whitespace-nowrap text-slate-600">{h.fecha ?? '—'}</td>
                                         <td className="py-2 pr-3">
-                                            <EstadoActividad estado={h.estado} />
+                                            <EstadoActividad estado={h.estado} estados={estados} />
                                         </td>
                                         <td className="py-2 pr-3 text-slate-700">{h.observacion ?? '—'}</td>
                                         <td className="py-2 text-slate-600">{h.usuario}</td>

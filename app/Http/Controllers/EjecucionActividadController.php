@@ -13,28 +13,16 @@ class EjecucionActividadController extends Controller
     {
     }
 
-    public function iniciar(Request $request, Actividad $actividad)
+    // Estado Mercadeo: cambio manual de estado (o solo observaciones si se deja el mismo)
+    public function estado(Request $request, Actividad $actividad)
     {
-        return $this->responder(
-            fn () => $this->ejecucionService->iniciar($request, $actividad),
-            "Actividad #{$actividad->id} iniciada: quedó En proceso."
-        );
-    }
+        try {
+            $mensaje = $this->ejecucionService->cambiarEstado($request, $actividad);
+        } catch (\DomainException $e) {
+            return back()->with('alerta', $e->getMessage());
+        }
 
-    public function finalizar(Request $request, Actividad $actividad)
-    {
-        return $this->responder(
-            fn () => $this->ejecucionService->finalizar($request, $actividad),
-            "Actividad #{$actividad->id} finalizada."
-        );
-    }
-
-    public function anular(Request $request, Actividad $actividad)
-    {
-        return $this->responder(
-            fn () => $this->ejecucionService->anular($request, $actividad),
-            "Actividad #{$actividad->id} anulada."
-        );
+        return back()->with('mensaje', $mensaje);
     }
 
     // Archivo de finalización: foto o PDF (ruta protegida; está en el disco del servidor)
@@ -43,20 +31,15 @@ class EjecucionActividadController extends Controller
         return $this->ejecucionService->archivoFin($actividad);
     }
 
+    // Foto de finalización (ruta protegida; está en el disco del servidor)
+    public function fotoFin(Actividad $actividad)
+    {
+        return $this->ejecucionService->fotoFin($actividad);
+    }
+
     // Foto de inicio (ruta protegida; el archivo está en el disco del servidor)
     public function foto(Actividad $actividad)
     {
         return $this->ejecucionService->foto($actividad);
-    }
-
-    private function responder(callable $accion, string $mensaje)
-    {
-        try {
-            $accion();
-        } catch (\DomainException $e) {
-            return back()->with('alerta', $e->getMessage());
-        }
-
-        return back()->with('mensaje', $mensaje);
     }
 }

@@ -10,7 +10,9 @@ import { inputClass } from '@/components/Campo';
 import { IconoActividades } from '@/components/Iconos';
 import SelectBuscable from '@/components/SelectBuscable';
 import AppLayout from '@/layouts/AppLayout';
+import { colorEstado } from '@/lib/coloresEstado';
 import { url } from '@/lib/url';
+import { EstadoCatalogo } from '@/types/actividades';
 
 interface EventoActividad {
     id: number;
@@ -29,17 +31,9 @@ interface Props {
     opciones: {
         regionales: string[];
         agencias: { codigo: string; nombre: string }[];
-        estados: { valor: string; etiqueta: string }[];
+        estados: EstadoCatalogo[];
     };
 }
-
-// Mismos colores que la etiqueta de estado de la lista
-const COLORES: Record<string, { fondo: string; borde: string; texto: string; etiqueta: string }> = {
-    PROGRAMADA: { fondo: '#dbeafe', borde: '#3b82f6', texto: '#1e40af', etiqueta: 'Programada' },
-    EN_PROCESO: { fondo: '#fef3c7', borde: '#f59e0b', texto: '#92400e', etiqueta: 'En proceso' },
-    FINALIZADA: { fondo: '#dcfce7', borde: '#22c55e', texto: '#166534', etiqueta: 'Finalizada' },
-    ANULADA: { fondo: '#fee2e2', borde: '#ef4444', texto: '#991b1b', etiqueta: 'Anulada' },
-};
 
 // Opciones fijas fuera del componente: así no cambian en cada render
 const PLUGINS = [dayGridPlugin, listPlugin];
@@ -58,6 +52,9 @@ const aFechaLocal = (fecha: Date) =>
     `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}-${String(fecha.getDate()).padStart(2, '0')}`;
 
 export default function Calendario({ opciones }: Props) {
+    // Mismos colores que la etiqueta de estado de la lista (matriz de estados)
+    const colores = useRef<Record<string, string>>({});
+    colores.current = Object.fromEntries(opciones.estados.map((e) => [e.codigo, e.color]));
     const calendario = useRef<FullCalendar>(null);
     const [filtros, setFiltros] = useState({ regional: '', agencia: '', estado: '' });
     const filtrosActuales = useRef(filtros); // los lee la función de eventos sin volver a crear el calendario
@@ -87,7 +84,7 @@ export default function Calendario({ opciones }: Props) {
             const actividades: EventoActividad[] = await respuesta.json();
 
             return actividades.map((a) => {
-                const color = COLORES[a.estado] ?? COLORES.PROGRAMADA;
+                const color = colorEstado(colores.current[a.estado]);
                 return {
                     id: String(a.id),
                     title: `${a.agencia} :: ${a.municipio}`,
@@ -141,8 +138,8 @@ export default function Calendario({ opciones }: Props) {
                         <select value={filtros.estado} onChange={(e) => cambiarFiltro({ estado: e.target.value })} className={inputClass}>
                             <option value="">TODOS</option>
                             {opciones.estados.map((e) => (
-                                <option key={e.valor} value={e.valor}>
-                                    {e.etiqueta}
+                                <option key={e.codigo} value={e.codigo}>
+                                    {e.nombre}
                                 </option>
                             ))}
                         </select>
@@ -151,12 +148,17 @@ export default function Calendario({ opciones }: Props) {
 
                 {/* Convenciones */}
                 <div className="mb-4 flex flex-wrap items-center gap-4 text-xs text-slate-600">
-                    {Object.entries(COLORES).map(([estado, c]) => (
-                        <span key={estado} className="inline-flex items-center gap-1.5">
-                            <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: c.fondo, borderColor: c.borde }} />
-                            {c.etiqueta}
-                        </span>
-                    ))}
+                    {opciones.estados
+                        .filter((e) => e.activo)
+                        .map((e) => {
+                            const c = colorEstado(e.color);
+                            return (
+                                <span key={e.codigo} className="inline-flex items-center gap-1.5">
+                                    <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: c.fondo, borderColor: c.borde }} />
+                                    {e.nombre}
+                                </span>
+                            );
+                        })}
                     {cargando && <span className="text-slate-400">Cargando…</span>}
                 </div>
 

@@ -1,6 +1,7 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import DetalleActividad from '@/components/actividades/DetalleActividad';
+import ResponsableEvento from '@/components/actividades/ResponsableEvento';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
 import Campo, { inputClass } from '@/components/Campo';
 import { IconoActividades } from '@/components/Iconos';
@@ -8,7 +9,7 @@ import Seccion from '@/components/Seccion';
 import SelectBuscable from '@/components/SelectBuscable';
 import AppLayout from '@/layouts/AppLayout';
 import { url } from '@/lib/url';
-import { DetalleDia, Item, Persona, ProductoInventario } from '@/types/actividades';
+import { AsesoresManager, DetalleDia, EmpleadoManager, Item, Persona, ProductoInventario, TITULOS_ASESORES } from '@/types/actividades';
 
 interface DatosAgencia {
     coordinadoresRegionales: Persona[];
@@ -16,6 +17,12 @@ interface DatosAgencia {
     /** 'correrias' = municipios de las correrías de la agencia; 'departamento' = no tiene correrías */
     municipiosOrigen: 'correrias' | 'departamento';
     asesores: Persona[];
+    /** Asesores de Manager por grupo (planta / externos; coduser = cédula), para las actividades en agencia y en correría */
+    asesoresManager: AsesoresManager;
+    asesoresManagerError: string | null;
+    /** Empleados activos de la agencia en Manager por tipo (EVENTO_CORRERIA, EVENTO_AGENCIA, EVENTO_PTO_SATELITE) */
+    responsablesAgencia: Record<string, EmpleadoManager[]>;
+    responsablesError: string | null;
     inventario: ProductoInventario[];
     inventarioError: string | null;
 }
@@ -24,6 +31,8 @@ interface ActividadForm extends DetalleDia {
     fecha: string;
     actividad_tipo_id: string;
     ciudad_id: string;
+    tipo_responsable: string;
+    responsable_evento_id: string; // cédula del empleado en Manager
 }
 
 interface AgenciaOpcion {
@@ -35,7 +44,7 @@ interface AgenciaOpcion {
 interface ProgramacionExistente {
     id: number;
     coorRegional: Persona;
-    responsable: Persona;
+    responsable: Persona; // responsable mercadeo
     fechas: { fecha: string; id: number }[];
 }
 
@@ -43,7 +52,10 @@ interface Props {
     regionales: string[];
     tipos: Item[];
     checklist: Item[];
-    responsables: Persona[];
+    responsables: Persona[]; // responsable mercadeo
+    tiposResponsable: { valor: string; nombre: string }[];
+    /** Id del tipo de actividad => grupo de asesores de Manager ('planta' | 'externos'); los demás usan toolset_perf */
+    gruposAsesores: Record<string, string>;
     /** Al llegar desde una actividad ("Agregar actividad a esta programación") */
     inicial: { regional: string; agencia_id: string; mes: string } | null;
 }
@@ -80,7 +92,7 @@ async function obtenerJson<T>(ruta: string): Promise<T> {
     return respuesta.json();
 }
 
-export default function Create({ regionales, tipos, checklist, responsables, inicial }: Props) {
+export default function Create({ regionales, tipos, checklist, responsables, tiposResponsable, gruposAsesores, inicial }: Props) {
     const meses = useMemo(mesesDisponibles, []);
     const { data, setData, post, processing, errors, transform } = useForm({
         regional: '',
@@ -142,7 +154,7 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
             regional,
             agencia_id: '',
             coor_regional_id: '',
-            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [], asesores: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', responsable_evento_id: '', productos: [], asesores: [] })),
         }));
         setAgencias([]);
         setDatosAgencia(null);
@@ -169,7 +181,7 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
             ...prev,
             agencia_id: codigo,
             coor_regional_id: '',
-            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', productos: [], asesores: [] })),
+            actividades: prev.actividades.map((a) => ({ ...a, ciudad_id: '', responsable_evento_id: '', productos: [], asesores: [] })),
         }));
         setDatosAgencia(null);
         setErrorCarga(null);
@@ -225,7 +237,16 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
             return;
         }
 
-        const nueva: ActividadForm = { fecha: nuevaFecha, actividad_tipo_id: nuevoTipo, ciudad_id: '', productos: [], asesores: [], checklist: [] };
+        const nueva: ActividadForm = {
+            fecha: nuevaFecha,
+            actividad_tipo_id: nuevoTipo,
+            ciudad_id: '',
+            tipo_responsable: '',
+            responsable_evento_id: '',
+            productos: [],
+            asesores: [],
+            checklist: [],
+        };
         setData((prev) => ({
             ...prev,
             actividades: [...prev.actividades, nueva].sort((a, b) => a.fecha.localeCompare(b.fecha)),
@@ -264,9 +285,15 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                 fecha: a.fecha,
                 actividad_tipo_id: a.actividad_tipo_id,
                 ciudad_id: a.ciudad_id,
+                tipo_responsable: a.tipo_responsable,
+                responsable_evento_id: a.responsable_evento_id,
                 productos: a.productos.map((p) => ({ producto: p.producto, cantidad: p.cantidad })),
                 asesores: a.asesores,
-                checklist: a.checklist,
+                checklist: a.checklist.map((c) => ({
+                    checklist_item_id: c.checklist_item_id,
+                    nombre: c.nombre,
+                    presupuesto_asignado: c.presupuesto_asignado,
+                })),
             })),
         }));
 
@@ -325,6 +352,19 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                     </div>
                 </Seccion>
 
+                {/* Mientras llegan coordinador, responsables, municipios, asesores e inventario de la agencia */}
+                {cargando === 'agencia' && (
+                    <div role="status" className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                        <svg className="h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                        </svg>
+                        <p>
+                            Cargando la información de <strong>{nombreAgencia || 'la agencia'}</strong>: responsables, municipios, asesores e inventario…
+                        </p>
+                    </div>
+                )}
+
                 {existente && (
                     <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                         <svg className="mt-0.5 shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -345,7 +385,7 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                             <Campo etiqueta="Coordinador regional">
                                 <input value={existente.coorRegional.nombre} disabled className={inputClass} />
                             </Campo>
-                            <Campo etiqueta="Responsable">
+                            <Campo etiqueta="Responsable mercadeo">
                                 <input value={existente.responsable.nombre} disabled className={inputClass} />
                             </Campo>
                         </div>
@@ -358,7 +398,7 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                                     opciones={(datosAgencia?.coordinadoresRegionales ?? []).map((c) => ({ valor: c.coduser, etiqueta: c.nombre }))}
                                     valor={data.coor_regional_id}
                                     onChange={(v) => setData('coor_regional_id', v)}
-                                    placeholder={data.agencia_id ? 'SELECCIONE' : 'Seleccione la agencia'}
+                                    placeholder={cargando === 'agencia' ? 'Cargando...' : data.agencia_id ? 'SELECCIONE' : 'Seleccione la agencia'}
                                     disabled={!datosAgencia}
                                     conError={!!errores.coor_regional_id}
                                 />
@@ -367,7 +407,7 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                                 )}
                             </Campo>
 
-                            <Campo etiqueta="Responsable" obligatorio error={errores.responsable_id}>
+                            <Campo etiqueta="Responsable mercadeo" obligatorio error={errores.responsable_id}>
                                 <SelectBuscable
                                     opciones={responsables.map((r) => ({ valor: r.coduser, etiqueta: r.nombre }))}
                                     valor={data.responsable_id}
@@ -443,6 +483,8 @@ export default function Create({ regionales, tipos, checklist, responsables, ini
                                     actividad={actividad}
                                     error={(campo) => errores[`actividades.${i}.${campo}`]}
                                     tipos={tipos}
+                                    tiposResponsable={tiposResponsable}
+                                    gruposAsesores={gruposAsesores}
                                     checklist={checklist}
                                     datosAgencia={datosAgencia}
                                     agenciaSeleccionada={!!data.agencia_id}
@@ -475,6 +517,8 @@ interface TarjetaActividadProps {
     actividad: ActividadForm;
     error: (campo: string) => string | undefined;
     tipos: Item[];
+    tiposResponsable: { valor: string; nombre: string }[];
+    gruposAsesores: Record<string, string>;
     checklist: Item[];
     datosAgencia: DatosAgencia | null;
     agenciaSeleccionada: boolean;
@@ -483,8 +527,25 @@ interface TarjetaActividadProps {
 }
 
 // Una actividad agregada: fecha fija, tipo y municipio editables, y su detalle (productos, asesores, checklist)
-function TarjetaActividad({ actividad, error, tipos, checklist, datosAgencia, agenciaSeleccionada, onChange, onQuitar }: TarjetaActividadProps) {
+function TarjetaActividad({
+    actividad,
+    error,
+    tipos,
+    tiposResponsable,
+    gruposAsesores,
+    checklist,
+    datosAgencia,
+    agenciaSeleccionada,
+    onChange,
+    onQuitar,
+}: TarjetaActividadProps) {
     const [fecha, diaSemana] = formatearFecha(actividad.fecha);
+
+    // En agencia y en correría los asesores salen de Manager (planta / externos); en los demás tipos, de toolset_perf
+    const grupo = gruposAsesores[actividad.actividad_tipo_id];
+    const cambiarTipo = (tipo: string) =>
+        // Al cambiar de lista de asesores se quitan los escogidos (son personas distintas)
+        onChange(gruposAsesores[tipo] === grupo ? { actividad_tipo_id: tipo } : { actividad_tipo_id: tipo, asesores: [] });
 
     return (
         <div className="rounded-lg border border-blue-200 bg-white shadow-sm">
@@ -498,7 +559,7 @@ function TarjetaActividad({ actividad, error, tipos, checklist, datosAgencia, ag
                 <div>
                     <select
                         value={actividad.actividad_tipo_id}
-                        onChange={(e) => onChange({ actividad_tipo_id: e.target.value })}
+                        onChange={(e) => cambiarTipo(e.target.value)}
                         className={`${inputClass} ${error('actividad_tipo_id') ? 'border-red-400' : ''}`}
                     >
                         {tipos.map((t) => (
@@ -537,7 +598,20 @@ function TarjetaActividad({ actividad, error, tipos, checklist, datosAgencia, ag
                 </button>
             </div>
 
-            <div className="p-3">
+            <div className="space-y-4 p-3">
+                {/* Responsable evento del día (empleado de Manager según el tipo) */}
+                <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                    <ResponsableEvento
+                        tipos={tiposResponsable}
+                        responsables={datosAgencia && !datosAgencia.responsablesError ? datosAgencia.responsablesAgencia : null}
+                        mensaje={!agenciaSeleccionada ? 'Seleccione la agencia para ver los responsables.' : datosAgencia?.responsablesError}
+                        tipo={actividad.tipo_responsable}
+                        responsable={actividad.responsable_evento_id}
+                        onChange={onChange}
+                        error={error}
+                    />
+                </div>
+
                 <DetalleActividad
                     valor={actividad}
                     onChange={onChange}
@@ -545,8 +619,15 @@ function TarjetaActividad({ actividad, error, tipos, checklist, datosAgencia, ag
                     mensajeInventario={
                         !agenciaSeleccionada ? 'Seleccione la agencia para ver su inventario.' : (datosAgencia?.inventarioError ?? 'Cargando inventario...')
                     }
-                    asesores={datosAgencia?.asesores ?? []}
-                    mensajeAsesores={!agenciaSeleccionada ? 'Seleccione la agencia para ver sus asesores.' : undefined}
+                    asesores={(grupo ? datosAgencia?.asesoresManager[grupo] : datosAgencia?.asesores) ?? []}
+                    tituloAsesores={grupo ? TITULOS_ASESORES[grupo] : 'Asesores'}
+                    mensajeAsesores={
+                        !agenciaSeleccionada
+                            ? 'Seleccione la agencia para ver sus asesores.'
+                            : grupo && datosAgencia && datosAgencia.asesoresManager[grupo] === null
+                              ? datosAgencia.asesoresManagerError
+                              : undefined
+                    }
                     checklist={checklist}
                     error={error}
                 />

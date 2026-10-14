@@ -9,6 +9,7 @@ import SelectBuscable from '@/components/SelectBuscable';
 import { useCan } from '@/hooks/useCan';
 import AppLayout from '@/layouts/AppLayout';
 import { Paginado } from '@/types';
+import { EstadoCatalogo } from '@/types/actividades';
 import { url } from '@/lib/url';
 
 interface ActividadFila {
@@ -23,6 +24,8 @@ interface ActividadFila {
     horaFin: string | null;
     estado: string;
     editable: boolean;
+    creadoPor: string; // usuario que creó la actividad
+    creadoEn: string | null; // "YYYY-MM-DD HH:mm"
 }
 
 interface Filtros {
@@ -40,7 +43,7 @@ interface Props {
         regionales: string[];
         agencias: { codigo: string; nombre: string }[];
         meses: { valor: string; etiqueta: string }[];
-        estados: { valor: string; etiqueta: string }[];
+        estados: EstadoCatalogo[];
     };
 }
 
@@ -127,8 +130,8 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                         <select value={filtros.estado} onChange={(e) => filtrar({ estado: e.target.value })} className={inputClass}>
                             <option value="">TODOS</option>
                             {opciones.estados.map((e) => (
-                                <option key={e.valor} value={e.valor}>
-                                    {e.etiqueta}
+                                <option key={e.codigo} value={e.codigo}>
+                                    {e.nombre}
                                 </option>
                             ))}
                         </select>
@@ -146,16 +149,20 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                                 <th className="py-2 pr-3 font-medium">Agencia</th>
                                 <th className="py-2 pr-3 font-medium">Municipio</th>
                                 <th className="py-2 pr-3 font-medium">Tipo</th>
-                                <th className="py-2 pr-3 font-medium">Responsable</th>
+                                <th className="py-2 pr-3 font-medium">Responsable mercadeo</th>
                                 <th className="py-2 pr-3 font-medium">Inicio</th>
                                 <th className="py-2 pr-3 font-medium">Fin</th>
                                 <th className="py-2 pr-3 font-medium">Estado</th>
+                                <th className="py-2 pr-3 font-medium">Creada por</th>
+                                <th className="py-2 pr-3 font-medium">Fecha creación</th>
                                 <th className="py-2"></th>
                             </tr>
                         </thead>
                         <tbody>
                             {actividades.data.map((a) => {
                                 const [fecha, diaSemana] = formatearFecha(a.fecha);
+                                // "2026-10-09 14:30" -> ["09/10/2026", "14:30"]
+                                const creadoEn = a.creadoEn ? [formatearFecha(a.creadoEn.slice(0, 10))[0], a.creadoEn.slice(11, 16)] : null;
                                 const puedeEditar = a.editable && can('act_edit');
 
                                 return (
@@ -173,7 +180,18 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                                         <td className="py-3 pr-3 text-slate-600">{a.horaInicio ?? '—'}</td>
                                         <td className="py-3 pr-3 text-slate-600">{a.horaFin ?? '—'}</td>
                                         <td className="py-3 pr-3">
-                                            <EstadoActividad estado={a.estado} />
+                                            <EstadoActividad estado={a.estado} estados={opciones.estados} />
+                                        </td>
+                                        <td className="py-3 pr-3 text-slate-600">{a.creadoPor}</td>
+                                        <td className="py-3 pr-3 whitespace-nowrap text-slate-600">
+                                            {creadoEn ? (
+                                                <>
+                                                    {creadoEn[0]}
+                                                    <span className="block text-xs text-slate-400">{creadoEn[1]}</span>
+                                                </>
+                                            ) : (
+                                                '—'
+                                            )}
                                         </td>
                                         <td className="py-3 text-right">
                                             <Link

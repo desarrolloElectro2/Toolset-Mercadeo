@@ -1,19 +1,23 @@
 import { useForm } from '@inertiajs/react';
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import Campo, { inputClass } from '@/components/Campo';
-import Modal from '@/components/Modal';
 import Seccion from '@/components/Seccion';
+import { useCan } from '@/hooks/useCan';
+import { camposUbicacion, textoUbicacion, useUbicacion } from '@/hooks/useUbicacion';
 import { url } from '@/lib/url';
+import { EstadoCatalogo } from '@/types/actividades';
 
 export interface DatosEjecucion {
     horaInicio: string | null;
     horaFin: string | null;
     observaciones: string | null;
     tieneFoto: boolean;
+    tieneFotoFin: boolean;
     /** Archivo de finalización: 'imagen' (miniatura) o 'pdf' (enlace); null si no tiene */
     archivoFin: 'imagen' | 'pdf' | null;
     antesDeFecha: boolean;
-    motivoAnulacion: string | null;
+    /** Observación del último cambio al estado actual, si ese estado la exige (p. ej. motivo de anulación) */
+    motivoEstado: string | null;
 }
 
 interface Props {
@@ -21,11 +25,13 @@ interface Props {
     estado: string;
     fecha: string; // "02/10/2026"
     ejecucion: DatosEjecucion;
-    puedeEjecutar: boolean; // act_edit
-    puedeAnular: boolean; // act_anular
+    estados: EstadoCatalogo[];
 }
 
 const botonPrimario = 'rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50';
+
+const claseArchivo =
+    'block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100';
 
 function Dato({ etiqueta, valor }: { etiqueta: string; valor: string | null }) {
     return (
@@ -36,34 +42,22 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string | null }) {
     );
 }
 
-/** Ejecución de la actividad: iniciar (hora + foto), finalizar (hora fin) y anular (motivo). */
-export default function EjecucionActividad({ actividadId, estado, fecha, ejecucion, puedeEjecutar, puedeAnular }: Props) {
+/** Estado Mercadeo: lo ya registrado + select para cambiar el estado manualmente (reglas de la matriz de estados). */
+export default function EjecucionActividad({ actividadId, estado, fecha, ejecucion, estados }: Props) {
+    const can = useCan();
     const rutaFoto = url(`/actividades/${actividadId}/foto-inicio`);
     const rutaArchivoFin = url(`/actividades/${actividadId}/archivo-fin`);
-    const anulable = puedeAnular && (estado === 'PROGRAMADA' || estado === 'EN_PROCESO');
-    const [anulando, setAnulando] = useState(false);
+    const rutaFotoFin = url(`/actividades/${actividadId}/foto-fin`);
+    const actual = estados.find((e) => e.codigo === estado);
+
+    // Estados a los que el usuario puede pasar: activos y con el permiso que exige cada uno
+    const destinos = estados.filter((e) => e.codigo !== estado && e.activo && can(e.permiso));
+    const modificable = destinos.length > 0 || can('act_edit');
 
     return (
-        <Seccion
-            titulo="Ejecución"
-            acciones={
-                anulable && (
-                    <button
-                        type="button"
-                        onClick={() => setAnulando(true)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:border-red-300 hover:bg-red-100"
-                    >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="m4.9 4.9 14.2 14.2" />
-                        </svg>
-                        Anular actividad
-                    </button>
-                )
-            }
-        >
+        <Seccion titulo="Estado Mercadeo">
             {/* Lo ya registrado */}
-            {(estado !== 'PROGRAMADA' || ejecucion.observaciones) && (
+            {(ejecucion.horaInicio || ejecucion.observaciones || ejecucion.motivoEstado) && (
                 <div className="mb-5 space-y-4">
                     <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Dato etiqueta="Fecha" valor={fecha} />
@@ -71,7 +65,7 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
                         <Dato etiqueta="Hora fin" valor={ejecucion.horaFin} />
                     </div>
 
-                    {(ejecucion.tieneFoto || ejecucion.archivoFin) && (
+                    {(ejecucion.tieneFoto || ejecucion.tieneFotoFin || ejecucion.archivoFin) && (
                         <div className="flex flex-wrap gap-6">
                             {ejecucion.tieneFoto && (
                                 <a href={rutaFoto} target="_blank" rel="noreferrer" title="Ver foto de inicio" className="block">
@@ -83,9 +77,19 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
                                     />
                                 </a>
                             )}
+                            {ejecucion.tieneFotoFin && (
+                                <a href={rutaFotoFin} target="_blank" rel="noreferrer" title="Ver foto de finalización" className="block">
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Foto de finalización</p>
+                                    <img
+                                        src={rutaFotoFin}
+                                        alt="Foto de finalización de la actividad"
+                                        className="h-20 w-28 rounded-lg border border-slate-200 object-cover hover:opacity-90"
+                                    />
+                                </a>
+                            )}
                             {ejecucion.archivoFin && (
-                                <a href={rutaArchivoFin} target="_blank" rel="noreferrer" title="Ver archivo de finalización" className="block">
-                                    <p className="mb-1 text-xs font-medium text-slate-500">Archivo de finalización</p>
+                                <a href={rutaArchivoFin} target="_blank" rel="noreferrer" title="Ver soporte de finalización" className="block">
+                                    <p className="mb-1 text-xs font-medium text-slate-500">Soporte de finalización</p>
                                     {ejecucion.archivoFin === 'imagen' ? (
                                         <img
                                             src={rutaArchivoFin}
@@ -107,197 +111,230 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
                     )}
 
                     {ejecucion.observaciones && <Dato etiqueta="Observaciones generales" valor={ejecucion.observaciones} />}
-                    {ejecucion.motivoAnulacion && (
-                        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{ejecucion.motivoAnulacion}</p>
+                    {ejecucion.motivoEstado && (
+                        <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">{ejecucion.motivoEstado}</p>
                     )}
                 </div>
             )}
 
-            {estado === 'PROGRAMADA' &&
-                (!puedeEjecutar ? (
-                    <p className="text-sm text-slate-400">Pendiente de iniciar.</p>
-                ) : ejecucion.antesDeFecha ? (
-                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                        La actividad se podrá iniciar desde el <strong>{fecha}</strong>.
-                    </p>
-                ) : (
-                    <FormularioIniciar actividadId={actividadId} fecha={fecha} observaciones={ejecucion.observaciones} />
-                ))}
-
-            {estado === 'EN_PROCESO' && puedeEjecutar && (
-                <FormularioFinalizar actividadId={actividadId} horaInicio={ejecucion.horaInicio} observaciones={ejecucion.observaciones} />
+            {modificable ? (
+                <FormularioEstado
+                    key={estado}
+                    actividadId={actividadId}
+                    estado={estado}
+                    fecha={fecha}
+                    ejecucion={ejecucion}
+                    actual={actual}
+                    destinos={destinos}
+                    puedeObservar={can('act_edit')}
+                />
+            ) : (
+                <Dato etiqueta="Estado" valor={actual?.nombre ?? estado} />
             )}
-
-            {estado === 'FINALIZADA' && <p className="text-sm text-green-700">Actividad finalizada.</p>}
-
-            <ModalAnular actividadId={actividadId} abierto={anulando} onCerrar={() => setAnulando(false)} />
         </Seccion>
     );
 }
 
-// Programada -> En proceso
-function FormularioIniciar({ actividadId, fecha, observaciones }: { actividadId: number; fecha: string; observaciones: string | null }) {
-    const { data, setData, post, processing, errors } = useForm<{ hora_inicio: string; foto_inicio: File | null; observaciones: string }>({
-        hora_inicio: '',
-        foto_inicio: null,
-        observaciones: observaciones ?? '',
-    });
-    const [vistaPrevia, setVistaPrevia] = useState<string | null>(null);
-
-    // Libera la URL temporal de la vista previa
-    useEffect(() => () => {
-        if (vistaPrevia) URL.revokeObjectURL(vistaPrevia);
-    }, [vistaPrevia]);
-
-    const elegirFoto = (e: ChangeEvent<HTMLInputElement>) => {
-        const archivo = e.target.files?.[0] ?? null;
-        setData('foto_inicio', archivo);
-        setVistaPrevia(archivo ? URL.createObjectURL(archivo) : null);
-    };
-
-    const iniciar = (e: FormEvent) => {
-        e.preventDefault();
-        post(url(`/actividades/${actividadId}/iniciar`), { forceFormData: true, preserveScroll: true });
-    };
-
-    return (
-        <form onSubmit={iniciar} className="space-y-4">
-            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
-                <Campo etiqueta="Fecha actividad">
-                    <input value={fecha} disabled className={inputClass} />
-                </Campo>
-                <Campo etiqueta="Hora inicio" obligatorio error={errors.hora_inicio}>
-                    <input type="time" value={data.hora_inicio} onChange={(e) => setData('hora_inicio', e.target.value)} className={inputClass} />
-                </Campo>
-                <Campo etiqueta="Foto de inicio (JPG o PNG, máx. 5 MB)" obligatorio error={errors.foto_inicio}>
-                    <input
-                        type="file"
-                        accept="image/jpeg,image/png"
-                        onChange={elegirFoto}
-                        className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                    />
-                </Campo>
-            </div>
-
-            {vistaPrevia && <img src={vistaPrevia} alt="Vista previa de la foto" className="h-32 rounded-lg border border-slate-200 object-cover" />}
-
-            <Campo etiqueta="Observaciones generales" error={errors.observaciones}>
-                <textarea value={data.observaciones} onChange={(e) => setData('observaciones', e.target.value)} rows={2} maxLength={1000} className={inputClass} />
-            </Campo>
-
-            <div className="flex justify-end">
-                <button type="submit" disabled={processing} className={`${botonPrimario} bg-amber-500 hover:bg-amber-600`}>
-                    {processing ? 'Iniciando…' : 'Iniciar actividad'}
-                </button>
-            </div>
-        </form>
-    );
+interface FormEstado {
+    estado: string;
+    observaciones: string;
+    motivo: string;
+    hora_inicio: string;
+    foto_inicio: File | null;
+    hora_fin: string;
+    foto_fin: File | null;
+    archivo_fin: File | null;
 }
 
-// En proceso -> Finalizada (hora fin + archivo obligatorio: foto o PDF)
-function FormularioFinalizar({ actividadId, horaInicio, observaciones }: { actividadId: number; horaInicio: string | null; observaciones: string | null }) {
-    const { data, setData, post, processing, errors } = useForm<{ hora_fin: string; archivo_fin: File | null; observaciones: string }>({
-        hora_fin: '',
+/**
+ * Select del estado (siempre visible) + los campos que exige el escogido según la matriz:
+ * requiere inicio = hora inicio + foto; requiere fin = además hora fin + archivo; requiere observación = motivo.
+ * Lo que la actividad ya tiene (horas, foto, archivo) es opcional: solo se reemplaza.
+ * Dejando el estado actual solo se guardan las observaciones generales.
+ */
+function FormularioEstado({
+    actividadId,
+    estado,
+    fecha,
+    ejecucion,
+    actual,
+    destinos,
+    puedeObservar,
+}: {
+    actividadId: number;
+    estado: string;
+    fecha: string;
+    ejecucion: DatosEjecucion;
+    actual: EstadoCatalogo | undefined;
+    destinos: EstadoCatalogo[];
+    puedeObservar: boolean; // act_edit: guardar solo observaciones
+}) {
+    const { data, setData, post, transform, processing, errors } = useForm<FormEstado>({
+        estado,
+        observaciones: ejecucion.observaciones ?? '',
+        motivo: '',
+        hora_inicio: ejecucion.horaInicio ?? '',
+        foto_inicio: null,
+        hora_fin: ejecucion.horaFin ?? '',
+        foto_fin: null,
         archivo_fin: null,
-        observaciones: observaciones ?? '',
     });
-    const [vistaPrevia, setVistaPrevia] = useState<string | null>(null);
+    const [vistas, setVistas] = useState<{ foto_inicio: string | null; foto_fin: string | null; archivo_fin: string | null }>({
+        foto_inicio: null,
+        foto_fin: null,
+        archivo_fin: null,
+    });
 
-    // Libera la URL temporal de la vista previa
+    // Libera las URL temporales de las vistas previas
     useEffect(() => () => {
-        if (vistaPrevia) URL.revokeObjectURL(vistaPrevia);
-    }, [vistaPrevia]);
+        Object.values(vistas).forEach((v) => v && URL.revokeObjectURL(v));
+    }, [vistas]);
 
-    const elegirArchivo = (e: ChangeEvent<HTMLInputElement>) => {
-        const archivo = e.target.files?.[0] ?? null;
-        setData('archivo_fin', archivo);
-        // Vista previa solo para fotos; del PDF se muestra el nombre
-        setVistaPrevia(archivo && archivo.type.startsWith('image/') ? URL.createObjectURL(archivo) : null);
+    const sinCambio = data.estado === estado;
+    const destino = destinos.find((e) => e.codigo === data.estado);
+    const pideInicio = !sinCambio && !!destino?.requiereInicio;
+    const pideFin = !sinCambio && !!destino?.requiereFin;
+    const pideMotivo = !sinCambio && !!destino?.requiereObservacion;
+    const ubicacion = useUbicacion(pideInicio);
+
+    const cambiarEstado = (nuevo: string) => {
+        setData((prev) => ({ ...prev, estado: nuevo, foto_inicio: null, foto_fin: null, archivo_fin: null }));
+        setVistas({ foto_inicio: null, foto_fin: null, archivo_fin: null });
     };
 
-    const finalizar = (e: FormEvent) => {
+    const elegirArchivo = (campo: 'foto_inicio' | 'foto_fin' | 'archivo_fin') => (e: ChangeEvent<HTMLInputElement>) => {
+        const archivo = e.target.files?.[0] ?? null;
+        setData(campo, archivo);
+        // Vista previa solo para fotos; del PDF se muestra el nombre
+        setVistas((prev) => ({ ...prev, [campo]: archivo && archivo.type.startsWith('image/') ? URL.createObjectURL(archivo) : null }));
+    };
+
+    const guardar = (e: FormEvent) => {
         e.preventDefault();
-        post(url(`/actividades/${actividadId}/finalizar`), { forceFormData: true, preserveScroll: true });
+
+        // Solo viajan los campos que exige el estado escogido
+        const campos: (keyof FormEstado)[] = ['estado', 'observaciones'];
+        if (pideMotivo) campos.push('motivo');
+        if (pideInicio) campos.push('hora_inicio', 'foto_inicio');
+        if (pideFin) campos.push('hora_fin', 'foto_fin', 'archivo_fin');
+
+        // Con las fotos va la ubicación del dispositivo para escribirla sobre ellas
+        transform((d) => ({ ...Object.fromEntries(campos.map((c) => [c, d[c]])), ...(pideInicio ? camposUbicacion(ubicacion) : {}) }) as unknown as FormEstado);
+        post(url(`/actividades/${actividadId}/estado`), { forceFormData: true, preserveScroll: true });
     };
 
     return (
-        <form onSubmit={finalizar} className="space-y-4 border-t border-slate-100 pt-4">
+        <form onSubmit={guardar} className="space-y-4 border-t border-slate-100 pt-4">
             <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
-                <Campo etiqueta="Hora fin" obligatorio error={errors.hora_fin}>
-                    <input type="time" value={data.hora_fin} min={horaInicio ?? undefined} onChange={(e) => setData('hora_fin', e.target.value)} className={inputClass} />
+                <Campo etiqueta="Estado" obligatorio error={errors.estado}>
+                    <select value={data.estado} onChange={(e) => cambiarEstado(e.target.value)} className={inputClass}>
+                        <option value={estado}>{actual?.nombre ?? estado}</option>
+                        {destinos.map((e) => {
+                            // Iniciar o finalizar no se registra antes del día programado
+                            const bloqueado = e.requiereInicio && ejecucion.antesDeFecha;
+                            return (
+                                <option key={e.codigo} value={e.codigo} disabled={bloqueado}>
+                                    {e.nombre}
+                                    {bloqueado ? ` (desde el ${fecha})` : ''}
+                                </option>
+                            );
+                        })}
+                    </select>
                 </Campo>
-                <div className="sm:col-span-2">
-                    <Campo etiqueta="Archivo de finalización (JPG, PNG o PDF, máx. 5 MB)" obligatorio error={errors.archivo_fin}>
-                        <input
-                            type="file"
-                            accept="image/jpeg,image/png,application/pdf"
-                            onChange={elegirArchivo}
-                            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                        />
-                    </Campo>
-                </div>
+
+                {pideInicio && (
+                    <>
+                        <Campo etiqueta="Hora inicio" obligatorio error={errors.hora_inicio}>
+                            <input type="time" value={data.hora_inicio} onChange={(e) => setData('hora_inicio', e.target.value)} className={inputClass} />
+                        </Campo>
+                        <Campo
+                            etiqueta={ejecucion.tieneFoto ? 'Reemplazar foto de inicio (opcional)' : 'Foto de inicio (JPG o PNG, máx. 5 MB)'}
+                            obligatorio={!ejecucion.tieneFoto}
+                            error={errors.foto_inicio}
+                        >
+                            <input type="file" accept="image/jpeg,image/png" onChange={elegirArchivo('foto_inicio')} className={claseArchivo} />
+                        </Campo>
+                    </>
+                )}
             </div>
 
-            {vistaPrevia && <img src={vistaPrevia} alt="Vista previa del archivo" className="h-32 rounded-lg border border-slate-200 object-cover" />}
-            {data.archivo_fin && !vistaPrevia && (
-                <p className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <path d="M14 2v6h6" />
-                    </svg>
-                    {data.archivo_fin.name}
+            {pideFin && (
+                <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
+                    <Campo etiqueta="Hora fin" obligatorio error={errors.hora_fin}>
+                        <input
+                            type="time"
+                            value={data.hora_fin}
+                            min={data.hora_inicio || undefined}
+                            onChange={(e) => setData('hora_fin', e.target.value)}
+                            className={inputClass}
+                        />
+                    </Campo>
+                    <Campo
+                        etiqueta={ejecucion.tieneFotoFin ? 'Reemplazar foto de finalización (opcional)' : 'Foto de finalización (JPG o PNG, máx. 5 MB)'}
+                        obligatorio={!ejecucion.tieneFotoFin}
+                        error={errors.foto_fin}
+                    >
+                        <input type="file" accept="image/jpeg,image/png" onChange={elegirArchivo('foto_fin')} className={claseArchivo} />
+                    </Campo>
+                    <Campo
+                        etiqueta={ejecucion.archivoFin ? 'Reemplazar soporte de finalización (opcional)' : 'Soporte de finalización (JPG, PNG o PDF, máx. 5 MB)'}
+                        obligatorio={!ejecucion.archivoFin}
+                        error={errors.archivo_fin}
+                    >
+                        <input type="file" accept="image/jpeg,image/png,application/pdf" onChange={elegirArchivo('archivo_fin')} className={claseArchivo} />
+                    </Campo>
+                </div>
+            )}
+
+            {/* Ubicación que se escribirá sobre las fotos (con la fecha y hora de carga) */}
+            {pideInicio && (
+                <p className={`text-xs ${ubicacion.estado === 'ok' ? 'text-slate-500' : 'text-amber-700'}`}>
+                    {textoUbicacion(ubicacion)} Las fotos se marcan con la fecha y hora de carga y la ubicación.
                 </p>
             )}
 
-            <Campo etiqueta="Observaciones generales" error={errors.observaciones}>
-                <textarea value={data.observaciones} onChange={(e) => setData('observaciones', e.target.value)} rows={2} maxLength={1000} className={inputClass} />
+            {(vistas.foto_inicio || vistas.foto_fin || vistas.archivo_fin || data.archivo_fin) && (
+                <div className="flex flex-wrap gap-4">
+                    {vistas.foto_inicio && <img src={vistas.foto_inicio} alt="Vista previa de la foto de inicio" className="h-32 rounded-lg border border-slate-200 object-cover" />}
+                    {vistas.foto_fin && <img src={vistas.foto_fin} alt="Vista previa de la foto de finalización" className="h-32 rounded-lg border border-slate-200 object-cover" />}
+                    {vistas.archivo_fin && <img src={vistas.archivo_fin} alt="Vista previa del archivo de finalización" className="h-32 rounded-lg border border-slate-200 object-cover" />}
+                    {data.archivo_fin && !vistas.archivo_fin && (
+                        <p className="inline-flex items-center gap-1.5 self-start rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <path d="M14 2v6h6" />
+                            </svg>
+                            {data.archivo_fin.name}
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {pideMotivo && (
+                <Campo etiqueta={`Observación del cambio a ${destino?.nombre}`} obligatorio error={errors.motivo}>
+                    <textarea value={data.motivo} onChange={(e) => setData('motivo', e.target.value)} rows={2} maxLength={500} className={inputClass} />
+                </Campo>
+            )}
+
+            <Campo etiqueta="Observaciones generales" obligatorio={sinCambio} error={errors.observaciones}>
+                <textarea
+                    value={data.observaciones}
+                    onChange={(e) => setData('observaciones', e.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    disabled={!puedeObservar}
+                    className={inputClass}
+                />
             </Campo>
 
-            <div className="flex justify-end">
-                <button type="submit" disabled={processing} className={`${botonPrimario} bg-green-600 hover:bg-green-700`}>
-                    {processing ? 'Finalizando…' : 'Finalizar actividad'}
-                </button>
-            </div>
-        </form>
-    );
-}
-
-// Programada o En proceso -> Anulada (motivo obligatorio)
-function ModalAnular({ actividadId, abierto, onCerrar }: { actividadId: number; abierto: boolean; onCerrar: () => void }) {
-    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({ motivo: '' });
-
-    const cerrar = () => {
-        reset();
-        clearErrors();
-        onCerrar();
-    };
-
-    const anular = (e: FormEvent) => {
-        e.preventDefault();
-        post(url(`/actividades/${actividadId}/anular`), { preserveScroll: true, onSuccess: cerrar });
-    };
-
-    return (
-        <Modal abierto={abierto} titulo={`Anular actividad #${actividadId}`} onCerrar={cerrar} bloqueado={processing}>
-            <form onSubmit={anular} className="space-y-4">
-                <p className="text-sm text-slate-600">La actividad quedará anulada y ya no se podrá editar ni ejecutar.</p>
-                <Campo etiqueta="Motivo de la anulación" obligatorio error={errors.motivo}>
-                    <textarea value={data.motivo} onChange={(e) => setData('motivo', e.target.value)} rows={3} maxLength={500} autoFocus className={inputClass} />
-                </Campo>
-                <div className="flex justify-end gap-2">
-                    <button
-                        type="button"
-                        onClick={cerrar}
-                        disabled={processing}
-                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                        Cancelar
-                    </button>
-                    <button type="submit" disabled={processing} className={`${botonPrimario} bg-red-600 hover:bg-red-700`}>
-                        {processing ? 'Anulando…' : 'Anular'}
+            {/* Guardar solo observaciones requiere act_edit */}
+            {(!sinCambio || puedeObservar) && (
+                <div className="flex justify-end">
+                    <button type="submit" disabled={processing} className={`${botonPrimario} bg-blue-600 hover:bg-blue-700`}>
+                        {processing ? 'Guardando…' : sinCambio ? 'Guardar observaciones' : `Cambiar a ${destino?.nombre ?? data.estado}`}
                     </button>
                 </div>
-            </form>
-        </Modal>
+            )}
+        </form>
     );
 }

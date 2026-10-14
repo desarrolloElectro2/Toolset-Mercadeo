@@ -23,12 +23,12 @@ class ActividadService
 
     private const MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
 
-    // Estados en los que todavía se puede cambiar lo planeado
-    private const ESTADOS_EDITABLES = [Actividad::PROGRAMADA, Actividad::EN_PROCESO];
-
     public function __construct(
         private InventarioService $inventarioService,
         private DetalleActividadService $detalleService,
+        private EstadoActividadService $estadoService,
+        private ResponsableAgenciaService $responsableService,
+        private ProspectosActividadService $prospectosService,
     ) {
     }
 
@@ -124,7 +124,7 @@ class ActividadService
     {
         $agencias = Agencia::query()->whereIn('codagen', $filas->pluck('agencia_id')->unique())->pluck('agennom', 'codagen');
         $municipios = Ciudad::query()->whereIn('id', $filas->pluck('ciudad_id')->unique())->pluck('ciudad', 'id');
-        $responsables = Usuario::query()->whereIn('coduser', $filas->pluck('responsable_id')->unique())->pluck('nombre', 'coduser');
+        $usuarios = Usuario::query()->whereIn('coduser', $filas->pluck('responsable_id')->unique())->pluck('nombre', 'coduser');
         $tipos = ActividadTipo::query()->pluck('nombre', 'id');
 
         return fn (Actividad $a) => [
@@ -134,11 +134,13 @@ class ActividadService
             'agencia'     => $agencias[$a->agencia_id] ?? $a->agencia_id,
             'municipio'   => $municipios[$a->ciudad_id] ?? '—',
             'tipo'        => $tipos[$a->actividad_tipo_id] ?? '—',
-            'responsable' => $responsables[$a->responsable_id] ?? $a->responsable_id,
+            'responsable' => $usuarios[$a->responsable_id] ?? $a->responsable_id,
             'horaInicio'  => $a->hora_inicio ? substr($a->hora_inicio, 0, 5) : null,
             'horaFin'     => $a->hora_fin ? substr($a->hora_fin, 0, 5) : null,
             'estado'      => $a->estado,
-            'editable'    => in_array($a->estado, self::ESTADOS_EDITABLES, true),
+            'editable'    => $this->estadoService->esEditable($a->estado),
+            'creadoPor'   => $a->user_new, // código del usuario (ej. BRMC092), no el nombre
+            'creadoEn'    => $a->created_at?->format('Y-m-d H:i'),
         ];
     }
 
@@ -147,16 +149,34 @@ class ActividadService
     {
         $programacion = $actividad->programacion;
         $agencia = Agencia::query()->findOrFail($programacion->agencia_id);
-        $editable = in_array($actividad->estado, self::ESTADOS_EDITABLES, true);
+        $editable = $this->estadoService->esEditable($actividad->estado);
 
         $asesoresGuardados = $this->asesoresGuardados($actividad);
+        $checklistGuardado = DB::connection('mysql')->table('actividad_checklist')->where('actividad_id', $actividad->id)->orderBy('id')->get();
 
         // Asesores de la agencia + los ya guardados (por si alguno cambió de agencia o se inactivó)
         $asesores = collect($this->detalleService->asesoresDeAgencia($agencia->codagen));
-        foreach ($asesoresGuardados as $coduser => $nombre) {
+        foreach ($asesoresGuardados as $coduser => $guardado) {
             if (! $asesores->contains('coduser', (string) $coduser)) {
-                $asesores->push(['coduser' => (string) $coduser, 'nombre' => $nombre]);
+                $asesores->push(['coduser' => (string) $coduser, 'nombre' => $guardado['nombre'], 'vendedor' => $guardado['vendedor']]);
             }
+        }
+
+        // Asesores de Manager por grupo (actividades en agencia / correría): si se va a editar, los activos + los guardados
+        $asesoresManager = $editable
+            ? $this->detalleService->asesoresManager($agencia)
+            : array_fill_keys(array_keys(ResponsableAgenciaService::CARGOS_ASESORES), []);
+        foreach ($asesoresManager as $grupo => $lista) {
+            if ($lista === null) {
+                continue;
+            }
+            $lista = collect($lista);
+            foreach ($asesoresGuardados as $coduser => $guardado) {
+                if (! $lista->contains('coduser', (string) $coduser)) {
+                    $lista->push(['coduser' => (string) $coduser, 'nombre' => $guardado['nombre'], 'vendedor' => $guardado['vendedor']]);
+                }
+            }
+            $asesoresManager[$grupo] = $lista->sortBy('nombre')->values()->all();
         }
 
         // Municipios de la agencia + el que ya tiene la actividad (si dejó de estar en la lista)
@@ -167,6 +187,9 @@ class ActividadService
                 $municipios->push(['id' => (int) $actual->id, 'nombre' => $actual->ciudad]);
             }
         }
+
+        // Responsables evento: si se va a editar, los de Manager + el guardado; si no, solo el guardado (con su nombre)
+        $responsables = $this->responsablesParaEditar($actividad, $agencia, $editable);
 
         // El inventario solo se consulta en Manager si se va a editar
         $inventario = $editable ? $this->inventarioService->productosDeAgencia($agencia) : [];
@@ -189,8 +212,14 @@ class ActividadService
                     'cantidad'   => (string) $p->cantidad,
                 ]),
                 'asesores'          => array_map('strval', array_keys($asesoresGuardados)),
-                'checklist'         => DB::connection('mysql')->table('actividad_checklist')
-                    ->where('actividad_id', $actividad->id)->pluck('checklist_item_id')->map(fn ($id) => (int) $id),
+                'tipo_responsable'      => (string) $actividad->tipo_responsable,
+                'responsable_evento_id' => (string) $actividad->responsable_evento_id,
+                'checklist'         => $checklistGuardado->map(fn ($c) => [
+                    'checklist_item_id'      => $c->checklist_item_id === null ? null : (int) $c->checklist_item_id,
+                    'nombre'                 => $c->nombre,
+                    'presupuesto_asignado'   => $c->presupuesto_asignado === null ? '' : rtrim(rtrim((string) $c->presupuesto_asignado, '0'), '.'),
+                    'presupuesto_autorizado' => $c->presupuesto_autorizado === null ? null : (float) $c->presupuesto_autorizado,
+                ])->values(),
             ],
             'programacion' => [
                 'id'           => $programacion->id,
@@ -200,39 +229,56 @@ class ActividadService
                 'regional'     => $programacion->regional,
                 'mes'          => self::MESES[$programacion->mes - 1].' '.$programacion->anio,
                 'coorRegional' => $personas[$programacion->coor_regional_id] ?? $programacion->coor_regional_id,
-                'responsable'  => $personas[$programacion->responsable_id] ?? $programacion->responsable_id,
+                'responsable'  => $personas[$programacion->responsable_id] ?? $programacion->responsable_id, // responsable mercadeo
             ],
             'ejecucion' => [
                 'horaInicio'     => $actividad->hora_inicio ? substr($actividad->hora_inicio, 0, 5) : null,
                 'horaFin'        => $actividad->hora_fin ? substr($actividad->hora_fin, 0, 5) : null,
                 'observaciones'  => $actividad->observaciones,
                 'tieneFoto'      => (bool) $actividad->foto_inicio,
+                'tieneFotoFin'   => (bool) $actividad->foto_fin,
                 // Archivo de finalización: foto o PDF (el PDF se muestra como enlace, no como miniatura)
                 'archivoFin'     => $actividad->archivo_fin
                     ? (str_ends_with(strtolower($actividad->archivo_fin), '.pdf') ? 'pdf' : 'imagen')
                     : null,
                 // Antes de la fecha programada no se puede iniciar
                 'antesDeFecha'   => $actividad->fecha->gt(today()),
-                'motivoAnulacion' => $actividad->estado === Actividad::ANULADA
-                    ? $actividad->historial()->where('estado', Actividad::ANULADA)->latest('id')->value('observacion')
+                // Si el estado exige observación, la del último cambio a ese estado
+                'motivoEstado'   => $this->estadoService->porCodigo($actividad->estado)?->requiere_observacion
+                    ? $actividad->historial()->where('estado', $actividad->estado)->latest('id')->value('observacion')
                     : null,
             ],
             'editable'        => $editable,
             'tipos'           => ActividadTipo::query()->orderBy('nombre')->get(['id', 'nombre']),
-            'checklist'       => ChecklistItem::query()->where('activo', 1)->orderBy('id')->get(['id', 'nombre']),
+            'tiposResponsable'    => $this->responsableService->tipos(),
+            'responsablesAgencia' => $responsables,
+            'responsablesError'   => $responsables === null ? 'No se pudieron consultar los responsables en Manager. Intente de nuevo en unos minutos.' : null,
+            // Ítems fijos activos + los que ya tenía la actividad aunque se hayan inactivado
+            'checklist'       => ChecklistItem::query()
+                ->where(fn ($q) => $q->where('activo', 1)->orWhereIn('id', $checklistGuardado->pluck('checklist_item_id')->filter()))
+                ->orderBy('orden')->orderBy('id')->get(['id', 'nombre']),
+            'evidencias'      => $this->evidencias($actividad),
+            // Al finalizar: prospectos y perfilaciones que crearon ese día los asesores asignados
+            'prospectos'      => $this->estadoService->porCodigo($actividad->estado)?->requiere_fin
+                ? $this->prospectosService->delDia($actividad)
+                : null,
             'asesores'        => $asesores->sortBy('nombre')->values(),
+            'asesoresManager'      => $asesoresManager, // grupo => asesores | null
+            'asesoresManagerError' => in_array(null, $asesoresManager, true) ? 'No se pudieron consultar los asesores en Manager. Intente de nuevo en unos minutos.' : null,
+            'gruposAsesores'       => $this->detalleService->gruposAsesores(),
             'municipios'      => $municipios->sortBy('nombre')->values(),
             'inventario'      => $inventario ?? [],
             'inventarioError' => $inventario === null ? 'No se pudo consultar el inventario en Manager. Intente de nuevo en unos minutos.' : null,
             'historial'       => $this->historial($actividad),
+            'estados'         => $this->estadoService->paraVista(),
         ];
     }
 
     // Guarda lo planeado del día: tipo, municipio, productos, asesores y checklist
     public function actualizar(Request $request, Actividad $actividad): void
     {
-        if (! in_array($actividad->estado, self::ESTADOS_EDITABLES, true)) {
-            throw new \DomainException("La actividad #{$actividad->id} está {$this->nombreEstado($actividad->estado)} y ya no se puede editar.");
+        if (! $this->estadoService->esEditable($actividad->estado)) {
+            throw new \DomainException("La actividad #{$actividad->id} está en estado {$this->estadoService->nombre($actividad->estado)} y no se puede editar.");
         }
 
         $validator = Validator::make($request->all(), $this->detalleService->reglasDia(''), $this->detalleService->mensajesDia(''));
@@ -249,6 +295,11 @@ class ActividadService
             'productos' => $actividad->productos()->get(['producto', 'nombre', 'referencia'])->toArray(),
             'asesores'  => $this->asesoresGuardados($actividad),
             'ciudad_id' => $actividad->ciudad_id,
+            'checklist' => DB::connection('mysql')->table('actividad_checklist')
+                ->where('actividad_id', $actividad->id)->whereNotNull('checklist_item_id')->pluck('checklist_item_id')->all(),
+            'responsable_evento' => $actividad->responsable_evento_id
+                ? ['tipo' => $actividad->tipo_responsable, 'cedula' => $actividad->responsable_evento_id]
+                : null,
         ]);
 
         $errores = $this->detalleService->erroresDia($datos, '', $catalogos);
@@ -261,6 +312,7 @@ class ActividadService
         DB::connection('mysql')->transaction(function () use ($actividad, $datos, $catalogos, $coduser) {
             $actividad->actividad_tipo_id = (int) $datos['actividad_tipo_id'];
             $actividad->ciudad_id         = (int) $datos['ciudad_id'];
+            $this->detalleService->asignarResponsable($actividad, $datos);
             $actividad->user_update       = $coduser;
             $actividad->save();
 
@@ -275,11 +327,45 @@ class ActividadService
         });
     }
 
-    // coduser => nombre de los asesores guardados en la actividad
+    /** @return array<string, array<int, array{cedula: string, nombre: string}>>|null  tipo => empleados; null = Manager no respondió */
+    private function responsablesParaEditar(Actividad $actividad, Agencia $agencia, bool $editable): ?array
+    {
+        $vacio = array_fill_keys(array_keys(ResponsableAgenciaService::TIPOS), []);
+        $responsables = $editable ? $this->responsableService->porAgencia($agencia) : $vacio;
+
+        $tipo = $actividad->tipo_responsable;
+        $cedula = (string) $actividad->responsable_evento_id;
+        if ($responsables !== null && $cedula !== '' && isset($responsables[$tipo])
+            && ! collect($responsables[$tipo])->contains('cedula', $cedula)) {
+            $responsables[$tipo][] = ['cedula' => $cedula, 'nombre' => $this->responsableService->nombre($cedula)];
+        }
+
+        return $responsables;
+    }
+
+    // Evidencias del gasto y de la actividad (archivos en el disco del servidor)
+    private function evidencias(Actividad $actividad): array
+    {
+        $registros = DB::connection('mysql')->table('actividad_evidencias')->where('actividad_id', $actividad->id)->orderBy('id')->get();
+        $usuarios = Usuario::query()->whereIn('coduser', $registros->pluck('user_new')->unique())->pluck('nombre', 'coduser');
+
+        return $registros->map(fn ($e) => [
+            'id'      => (int) $e->id,
+            'tipo'    => $e->tipo,
+            'nombre'  => $e->nombre_original,
+            'esPdf'   => str_ends_with(strtolower($e->ruta), '.pdf'),
+            'usuario' => $usuarios[$e->user_new] ?? $e->user_new,
+            'fecha'   => $e->created_at ? substr((string) $e->created_at, 0, 16) : null,
+        ])->all();
+    }
+
+    // coduser/cédula => ['nombre', 'vendedor'] de los asesores guardados en la actividad
     private function asesoresGuardados(Actividad $actividad): array
     {
         return DB::connection('mysql')->table('actividad_asesores')
-            ->where('actividad_id', $actividad->id)->pluck('nombre', 'coduser')->all();
+            ->where('actividad_id', $actividad->id)->get(['coduser', 'nombre', 'vendedor_cod'])
+            ->mapWithKeys(fn ($a) => [(string) $a->coduser => ['nombre' => $a->nombre, 'vendedor' => $a->vendedor_cod]])
+            ->all();
     }
 
     // "Buscar": por ID, nombre de agencia o nombre de municipio
@@ -317,8 +403,8 @@ class ActividadService
             'agencias'   => Agencia::query()->whereIn('codagen', $codigos)->orderBy('agennom')->get(['codagen', 'agennom'])
                 ->map(fn (Agencia $a) => ['codigo' => $a->codagen, 'nombre' => $a->agennom]),
             'meses'      => $meses,
-            'estados'    => collect([Actividad::PROGRAMADA, Actividad::EN_PROCESO, Actividad::FINALIZADA, Actividad::ANULADA])
-                ->map(fn ($e) => ['valor' => $e, 'etiqueta' => $this->nombreEstado($e)]),
+            // Matriz de estados: filtros, etiquetas de color y select de Estado Mercadeo
+            'estados'    => $this->estadoService->paraVista(),
         ];
     }
 
@@ -336,14 +422,4 @@ class ActividadService
         ])->all();
     }
 
-    private function nombreEstado(string $estado): string
-    {
-        return match ($estado) {
-            Actividad::PROGRAMADA => 'Programada',
-            Actividad::EN_PROCESO => 'En proceso',
-            Actividad::FINALIZADA => 'Finalizada',
-            Actividad::ANULADA    => 'Anulada',
-            default               => $estado,
-        };
-    }
 }

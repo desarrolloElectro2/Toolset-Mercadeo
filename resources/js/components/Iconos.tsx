@@ -34,6 +34,30 @@ export const IconoActividades = ({ tamano }: { tamano?: number }) => (
     </Icono>
 );
 
+export const IconoPromotoria = ({ tamano }: { tamano?: number }) => (
+    <Icono tamano={tamano}>
+        <path d="M20 10c0 4.99-5.54 10.19-7.4 11.8a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0" />
+        <circle cx="12" cy="10" r="3" />
+    </Icono>
+);
+
+export const IconoReportes = ({ tamano }: { tamano?: number }) => (
+    <Icono tamano={tamano}>
+        <path d="M3 3v18h18" />
+        <path d="M18 17V9" />
+        <path d="M13 17V5" />
+        <path d="M8 17v-3" />
+    </Icono>
+);
+
+export const IconoReporteActividades = ({ tamano }: { tamano?: number }) => (
+    <Icono tamano={tamano}>
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+        <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+        <path d="M8 18v-2M12 18v-4M16 18v-6" />
+    </Icono>
+);
+
 export const IconoConfiguracion = ({ tamano }: { tamano?: number }) => (
     <Icono tamano={tamano}>
         <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
@@ -61,6 +85,15 @@ export const IconoTiposActividad = ({ tamano }: { tamano?: number }) => (
     <Icono tamano={tamano}>
         <path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z" />
         <circle cx="7.5" cy="7.5" r="1.5" />
+    </Icono>
+);
+
+export const IconoEstadosActividad = ({ tamano }: { tamano?: number }) => (
+    <Icono tamano={tamano}>
+        <circle cx="5" cy="6" r="2" />
+        <circle cx="5" cy="18" r="2" />
+        <path d="M5 8v8" />
+        <path d="M11 6h10M11 12h10M11 18h10" />
     </Icono>
 );
 

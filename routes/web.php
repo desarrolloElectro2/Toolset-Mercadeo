@@ -4,9 +4,13 @@ use App\Http\Controllers\ActividadController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\EjecucionActividadController;
+use App\Http\Controllers\EstadoActividadController;
+use App\Http\Controllers\EvidenciaActividadController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\ProgramacionActividadController;
+use App\Http\Controllers\PromotoriaController;
+use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\TipoActividadController;
 use App\Http\Controllers\UsuarioController;
 use Inertia\Inertia;
@@ -38,17 +42,24 @@ Route::middleware('auth')->group(function () {
         Route::put('/{actividad}', [ActividadController::class, 'update'])
             ->whereNumber('actividad')->middleware('can:act_edit')->name('update');
 
-        // Ejecución: iniciar (hora + foto), finalizar (hora fin), anular (motivo) y ver la foto
-        Route::post('/{actividad}/iniciar', [EjecucionActividadController::class, 'iniciar'])
-            ->whereNumber('actividad')->middleware('can:act_edit')->name('iniciar');
-        Route::post('/{actividad}/finalizar', [EjecucionActividadController::class, 'finalizar'])
-            ->whereNumber('actividad')->middleware('can:act_edit')->name('finalizar');
-        Route::post('/{actividad}/anular', [EjecucionActividadController::class, 'anular'])
-            ->whereNumber('actividad')->middleware('can:act_anular')->name('anular');
+        // Estado Mercadeo: cambio manual de estado con sus datos (anular exige act_anular, lo demás act_edit;
+        // se valida en el servicio según el estado escogido) y ver los archivos
+        Route::post('/{actividad}/estado', [EjecucionActividadController::class, 'estado'])
+            ->whereNumber('actividad')->middleware('can:act_list')->name('estado');
         Route::get('/{actividad}/foto-inicio', [EjecucionActividadController::class, 'foto'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('foto');
+        Route::get('/{actividad}/foto-fin', [EjecucionActividadController::class, 'fotoFin'])
+            ->whereNumber('actividad')->middleware('can:act_list')->name('foto-fin');
         Route::get('/{actividad}/archivo-fin', [EjecucionActividadController::class, 'archivoFin'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('archivo-fin');
+
+        // Evidencias del gasto y de la actividad (las carga el responsable del evento)
+        Route::post('/{actividad}/evidencias', [EvidenciaActividadController::class, 'store'])
+            ->whereNumber('actividad')->middleware('can:act_edit')->name('evidencias.store');
+        Route::get('/{actividad}/evidencias/{evidencia}', [EvidenciaActividadController::class, 'show'])
+            ->whereNumber(['actividad', 'evidencia'])->middleware('can:act_list')->name('evidencias.show');
+        Route::delete('/{actividad}/evidencias/{evidencia}', [EvidenciaActividadController::class, 'destroy'])
+            ->whereNumber(['actividad', 'evidencia'])->middleware('can:act_edit')->name('evidencias.destroy');
 
         // Programación mensual
         Route::middleware('can:act_create')->group(function () {
@@ -61,6 +72,41 @@ Route::middleware('auth')->group(function () {
             Route::get('/datos/agencias', [ProgramacionActividadController::class, 'agencias'])->name('datos.agencias');
             Route::get('/datos/agencia/{codagen}', [ProgramacionActividadController::class, 'datosAgencia'])->name('datos.agencia');
             Route::get('/datos/programacion', [ProgramacionActividadController::class, 'programacionExistente'])->name('datos.programacion');
+        });
+    });
+
+    // Promotoría: acc_promotoria para entrar al módulo y, además, el permiso de cada acción sobre las visitas
+    Route::prefix('promotoria')->name('promotoria.')->middleware('can:acc_promotoria')->group(function () {
+        Route::get('/', [PromotoriaController::class, 'index'])->middleware('can:vis_show')->name('index');
+
+        Route::middleware('can:vis_create')->group(function () {
+            Route::get('/crear', [PromotoriaController::class, 'create'])->name('create');
+            Route::post('/', [PromotoriaController::class, 'store'])->name('store');
+        });
+
+        // La misma pantalla sirve de consulta (vis_show) y de edición (vis_edit)
+        Route::get('/{programacion}/editar', [PromotoriaController::class, 'edit'])
+            ->whereNumber('programacion')->middleware('can:vis_show')->name('edit');
+        Route::put('/{programacion}', [PromotoriaController::class, 'update'])
+            ->whereNumber('programacion')->middleware('can:vis_edit')->name('update');
+
+        Route::middleware('can:vis_delete')->group(function () {
+            Route::delete('/{programacion}', [PromotoriaController::class, 'destroy'])->whereNumber('programacion')->name('destroy');
+            Route::delete('/visitas/{visita}', [PromotoriaController::class, 'destroyVisita'])->whereNumber('visita')->name('visitas.destroy');
+        });
+
+        // Datos para los selects dependientes (JSON)
+        Route::get('/datos/agencias', [PromotoriaController::class, 'agencias'])->name('datos.agencias');
+        Route::get('/datos/lugares/{codagen}', [PromotoriaController::class, 'lugares'])->name('datos.lugares');
+    });
+
+    // Reportes: acc_reportes para entrar al módulo y, además, el permiso de cada reporte
+    Route::prefix('reportes')->name('reportes.')->middleware('can:acc_reportes')->group(function () {
+        Route::get('/', [ReporteController::class, 'index'])->name('index');
+
+        Route::middleware('can:rep_actividades')->group(function () {
+            Route::get('/actividades', [ReporteController::class, 'actividades'])->name('actividades');
+            Route::get('/actividades/exportar', [ReporteController::class, 'exportarActividades'])->name('actividades.exportar');
         });
     });
 
@@ -96,6 +142,14 @@ Route::middleware('auth')->group(function () {
             Route::post('/tipos-actividad', [TipoActividadController::class, 'store'])->name('tipos.store');
             Route::put('/tipos-actividad/{tipo}', [TipoActividadController::class, 'update'])->whereNumber('tipo')->name('tipos.update');
             Route::delete('/tipos-actividad/{tipo}', [TipoActividadController::class, 'destroy'])->whereNumber('tipo')->name('tipos.destroy');
+        });
+
+        // Estados de actividad (matriz parametrizable): un solo permiso para entrar y hacer todo el CRUD
+        Route::middleware('can:est_actividad')->group(function () {
+            Route::get('/estados-actividad', [EstadoActividadController::class, 'index'])->name('estados.index');
+            Route::post('/estados-actividad', [EstadoActividadController::class, 'store'])->name('estados.store');
+            Route::put('/estados-actividad/{estado}', [EstadoActividadController::class, 'update'])->whereNumber('estado')->name('estados.update');
+            Route::delete('/estados-actividad/{estado}', [EstadoActividadController::class, 'destroy'])->whereNumber('estado')->name('estados.destroy');
         });
     });
 });

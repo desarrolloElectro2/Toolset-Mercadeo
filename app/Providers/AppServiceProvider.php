@@ -13,7 +13,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Una sola instancia por petición: guarda los empleados de Manager ya consultados por agencia
+        $this->app->scoped(\App\Services\ResponsableAgenciaService::class);
     }
 
     /**
