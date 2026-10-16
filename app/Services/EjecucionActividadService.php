@@ -13,12 +13,14 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Estado Mercadeo: el estado se cambia manualmente a cualquiera de los activos de la matriz
+ * Estado Mercadeo: el estado se cambia manualmente a cualquiera de la matriz
  * (Configuración › Estados actividad). Lo que exige cada uno sale de sus reglas:
  *  - requiere_inicio:      hora de inicio + foto de inicio (no antes del día programado)
- *  - requiere_fin:         además hora de fin + foto de finalización + archivo de soporte (foto o PDF)
+ *  - requiere_fin:         solo el archivo de soporte (foto o PDF); no pide los datos de inicio
  *  - requiere_observacion: observación obligatoria (motivo del cambio)
- *  - permiso:              permiso que debe tener el usuario para asignarlo
+ *  - permiso:              el que exige el código para cada estado (EstadoActividadService::permiso)
+ *  - presupuesto:          a PRESUPUESTO ASIGNADO / AUTORIZADO con las reglas de PresupuestoActividadService;
+ *                          al autorizar, el presupuesto asignado pasa al autorizado
  * Lo que la actividad ya tiene (horas, foto, archivo) no se vuelve a pedir; si se envía, se reemplaza.
  * Dejando el mismo estado solo se actualizan las observaciones generales.
  */
@@ -30,6 +32,7 @@ class EjecucionActividadService
         private ArchivoService $archivoService,
         private EstadoActividadService $estadoService,
         private MarcaFotoService $marcaFotoService,
+        private PresupuestoActividadService $presupuestoService,
     ) {
     }
 
@@ -51,12 +54,17 @@ class EjecucionActividadService
         }
 
         $estado = $this->estadoService->porCodigo($codigo);
-        if ($estado === null || ! $estado->activo) {
+        if ($estado === null) {
             throw ValidationException::withMessages(['estado' => 'El estado no es válido.']);
         }
 
-        if (! $request->user()->can($estado->permiso)) {
+        if (! $request->user()->can($this->estadoService->permiso($estado->codigo))) {
             throw new \DomainException("No tiene permiso para pasar actividades a «{$estado->nombre}».");
+        }
+
+        $motivo = $this->presupuestoService->motivoRechazo($actividad, $estado->codigo);
+        if ($motivo !== null) {
+            throw new \DomainException("La actividad #{$actividad->id} no se puede pasar a «{$estado->nombre}»: {$motivo}.");
         }
 
         // Lo que exige iniciar o finalizar no se registra antes del día programado
@@ -73,7 +81,7 @@ class EjecucionActividadService
             $cambios['observaciones'] = trim($datos['observaciones']);
         }
 
-        if ($estado->requiere_inicio) {
+        if ($this->pideInicio($estado)) {
             if (! empty($datos['hora_inicio'])) {
                 $cambios['hora_inicio'] = $datos['hora_inicio'];
             }
@@ -83,24 +91,18 @@ class EjecucionActividadService
         }
 
         $inicio = substr((string) ($cambios['hora_inicio'] ?? $actividad->hora_inicio), 0, 5);
-        $fin = substr((string) ($cambios['hora_fin'] ?? $datos['hora_fin'] ?? $actividad->hora_fin), 0, 5);
 
-        if ($estado->requiere_fin) {
-            if (! empty($datos['hora_fin'])) {
-                $cambios['hora_fin'] = $datos['hora_fin'];
-            }
-            if ($fin <= $inicio) {
-                throw ValidationException::withMessages(['hora_fin' => "La hora de fin debe ser posterior a la hora de inicio ({$inicio})."]);
-            }
-            if ($request->hasFile('foto_fin')) {
-                $archivos['foto_fin'] = ['archivo' => $request->file('foto_fin'), 'prefijo' => 'FOTOFIN', 'hora' => $fin, 'titulo' => 'Foto de finalización'];
-            }
-            if ($request->hasFile('archivo_fin')) {
-                $archivos['archivo_fin'] = ['archivo' => $request->file('archivo_fin'), 'prefijo' => 'FIN', 'hora' => $fin, 'titulo' => 'Soporte de finalización'];
-            }
+        // Al finalizar solo se carga el archivo de soporte (queda en la carpeta del día con la hora de carga)
+        if ($estado->requiere_fin && $request->hasFile('archivo_fin')) {
+            $archivos['archivo_fin'] = ['archivo' => $request->file('archivo_fin'), 'prefijo' => 'FIN', 'hora' => now()->format('H:i'), 'titulo' => 'Soporte de finalización'];
         }
 
-        $this->guardar($actividad, $request, $cambios, $archivos, $this->textoHistorial($estado, $datos, $inicio, $fin));
+        // Al autorizar, el presupuesto asignado pasa al autorizado (en la misma transacción del cambio de estado)
+        $alGuardar = $estado->codigo === EstadoActividadService::PRESUPUESTO_AUTORIZADO
+            ? fn () => $this->presupuestoService->copiarAutorizado($actividad)
+            : null;
+
+        $this->guardar($actividad, $request, $cambios, $archivos, $this->textoHistorial($estado, $datos, $inicio), $alGuardar);
 
         return "Actividad #{$actividad->id}: estado cambiado a {$estado->nombre}.";
     }
@@ -111,14 +113,6 @@ class EjecucionActividadService
         abort_unless($actividad->archivo_fin, 404);
 
         return $this->archivoService->respuesta($actividad->archivo_fin);
-    }
-
-    // Foto de finalización desde el disco del servidor
-    public function fotoFin(Actividad $actividad): BinaryFileResponse
-    {
-        abort_unless($actividad->foto_fin, 404);
-
-        return $this->archivoService->respuesta($actividad->foto_fin);
     }
 
     // Foto de inicio desde el disco del servidor
@@ -140,27 +134,29 @@ class EjecucionActividadService
             ...MarcaFotoService::reglasUbicacion(), // ubicación del navegador para marcar las fotos
         ];
 
-        if ($estado->requiere_inicio) {
+        if ($this->pideInicio($estado)) {
             $reglas['hora_inicio'] = [$obligatorio($actividad->hora_inicio), 'date_format:H:i'];
             $reglas['foto_inicio'] = [$obligatorio($actividad->foto_inicio), 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'];
         }
 
         if ($estado->requiere_fin) {
-            $reglas['hora_fin']    = [$obligatorio($actividad->hora_fin), 'date_format:H:i'];
-            $reglas['foto_fin']    = [$obligatorio($actividad->foto_fin), 'file', 'image', 'mimes:jpg,jpeg,png', 'max:5120'];
             $reglas['archivo_fin'] = [$obligatorio($actividad->archivo_fin), 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'];
         }
 
         return $reglas;
     }
 
-    private function textoHistorial(ActividadEstado $estado, array $datos, string $inicio, string $fin): string
+    // Al finalizar no se piden los datos de inicio: solo el archivo de soporte
+    private function pideInicio(ActividadEstado $estado): bool
+    {
+        return $estado->requiere_inicio && ! $estado->requiere_fin;
+    }
+
+    private function textoHistorial(ActividadEstado $estado, array $datos, string $inicio): string
     {
         $texto = "Cambio a {$estado->nombre}";
 
-        if ($estado->requiere_fin) {
-            $texto .= " (de {$inicio} a {$fin})";
-        } elseif ($estado->requiere_inicio) {
+        if ($this->pideInicio($estado)) {
             $texto .= " (hora de inicio {$inicio})";
         }
 
@@ -175,7 +171,7 @@ class EjecucionActividadService
      * Guarda los archivos nuevos en el disco, aplica los cambios y registra el historial.
      * Si la BD falla se borran los archivos nuevos; si todo sale bien, los que fueron reemplazados.
      */
-    private function guardar(Actividad $actividad, Request $request, array $cambios, array $archivos, string $observacion): void
+    private function guardar(Actividad $actividad, Request $request, array $cambios, array $archivos, string $observacion, ?\Closure $alGuardar = null): void
     {
         $nuevos = [];
         $reemplazados = [];
@@ -190,7 +186,11 @@ class EjecucionActividadService
                 $reemplazados[] = $actividad->{$campo};
             }
 
-            DB::connection('mysql')->transaction(function () use ($actividad, $request, $cambios, $nuevos, $observacion) {
+            DB::connection('mysql')->transaction(function () use ($actividad, $request, $cambios, $nuevos, $observacion, $alGuardar) {
+                if ($alGuardar !== null) {
+                    $alGuardar();
+                }
+
                 foreach ($cambios + $nuevos as $campo => $valor) {
                     $actividad->{$campo} = $valor;
                 }
@@ -222,18 +222,11 @@ class EjecucionActividadService
         $validator = Validator::make($request->all(), $reglas, [
             'hora_inicio.required'    => 'Digite la hora de inicio.',
             'hora_inicio.date_format' => 'La hora de inicio no es válida.',
-            'hora_fin.required'       => 'Digite la hora de fin.',
-            'hora_fin.date_format'    => 'La hora de fin no es válida.',
             'foto_inicio.required'    => 'La foto de inicio es obligatoria.',
             'foto_inicio.image'       => 'El archivo debe ser una imagen.',
             'foto_inicio.mimes'       => 'La foto debe ser JPG o PNG.',
             'foto_inicio.max'         => 'La foto no puede pesar más de 5 MB.',
             'foto_inicio.uploaded'    => 'No se pudo subir la foto; puede que supere el tamaño permitido por el servidor.',
-            'foto_fin.required'       => 'La foto de finalización es obligatoria.',
-            'foto_fin.image'          => 'El archivo debe ser una imagen.',
-            'foto_fin.mimes'          => 'La foto debe ser JPG o PNG.',
-            'foto_fin.max'            => 'La foto no puede pesar más de 5 MB.',
-            'foto_fin.uploaded'       => 'No se pudo subir la foto; puede que supere el tamaño permitido por el servidor.',
             'archivo_fin.required'    => 'El archivo de finalización es obligatorio.',
             'archivo_fin.mimes'       => 'El archivo debe ser JPG, PNG o PDF.',
             'archivo_fin.max'         => 'El archivo no puede pesar más de 5 MB.',

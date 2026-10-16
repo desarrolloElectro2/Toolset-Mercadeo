@@ -31,12 +31,6 @@ class EjecucionActividadController extends Controller
         return $this->ejecucionService->archivoFin($actividad);
     }
 
-    // Foto de finalización (ruta protegida; está en el disco del servidor)
-    public function fotoFin(Actividad $actividad)
-    {
-        return $this->ejecucionService->fotoFin($actividad);
-    }
-
     // Foto de inicio (ruta protegida; el archivo está en el disco del servidor)
     public function foto(Actividad $actividad)
     {

@@ -17,13 +17,15 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Reporte de actividades entre dos fechas (fecha de la actividad), con su presupuesto (checklist mercadeo).
- * Se ve en pantalla (paginado) y se descarga completo en CSV para Excel.
+ * Reporte de actividades entre dos fechas (fecha de la actividad), filtrable por regional y agencia. Dos tipos:
+ *  - general:      cada actividad con su presupuesto (checklist mercadeo).
+ *  - cumplimiento: programadas vs. cumplidas por regional, agencia y mes (ReporteCumplimientoService).
+ * Ambos se descargan en CSV para Excel (no se muestran en pantalla).
  */
 class ReporteActividadService
 {
-    private const POR_PAGINA = 50;
     private const MAX_DIAS = 366;
+    private const TIPOS = ['general', 'cumplimiento'];
 
     // Columnas del reporte: clave de la fila => título (en este orden en pantalla y en el CSV)
     public const COLUMNAS = [
@@ -40,7 +42,6 @@ class ReporteActividadService
         'responsableEvento'     => 'Responsable evento',
         'cedulaResponsable'     => 'Cédula responsable evento',
         'horaInicio'            => 'Hora inicio',
-        'horaFin'               => 'Hora fin',
         'asesores'              => 'Asesores',
         'productos'             => 'Productos',
         'elementos'             => 'Checklist (presupuesto asignado)',
@@ -54,49 +55,39 @@ class ReporteActividadService
     public function __construct(
         private EstadoActividadService $estadoService,
         private ResponsableAgenciaService $responsableService,
+        private ReporteCumplimientoService $cumplimientoService,
     ) {
     }
 
-    /** Datos de la pantalla: filtros y, si ya se digitaron las fechas, el resultado paginado con sus totales */
+    /** Datos de la pantalla: filtros (el reporte no se muestra, se descarga) y agencias para los selects */
     public function pantalla(Request $request): array
     {
-        $filtros = ['desde' => (string) $request->query('desde', ''), 'hasta' => (string) $request->query('hasta', '')];
-
-        if ($filtros['desde'] === '' && $filtros['hasta'] === '') {
-            return ['filtros' => $filtros, 'columnas' => self::COLUMNAS, 'resultado' => null];
-        }
-
-        [$desde, $hasta] = $this->validarRango($filtros);
-
-        $pagina = $this->consulta($desde, $hasta)->paginate(self::POR_PAGINA)->withQueryString();
-        $pagina->setCollection(collect($this->filas(collect($pagina->items()))));
-
-        return [
-            'filtros'   => $filtros,
-            'columnas'  => self::COLUMNAS,
-            'resultado' => ['actividades' => $pagina, 'totales' => $this->totales($desde, $hasta)],
-        ];
+        return ['filtros' => $this->filtros($request), 'agencias' => $this->agencias()];
     }
 
     /** Todo el rango en CSV (separado por ";" y con BOM para que Excel en español lo abra con tildes y columnas) */
     public function exportar(Request $request): StreamedResponse
     {
-        [$desde, $hasta] = $this->validarRango(['desde' => (string) $request->query('desde', ''), 'hasta' => (string) $request->query('hasta', '')]);
+        $filtros = $this->filtros($request);
+        [$desde, $hasta] = $this->validarRango($filtros);
+        if ($filtros['tipo'] === 'cumplimiento') {
+            return $this->cumplimientoService->exportar($desde, $hasta, $filtros);
+        }
         $nombre = "reporte_actividades_{$desde->format('Ymd')}_{$hasta->format('Ymd')}.csv";
 
-        return response()->streamDownload(function () use ($desde, $hasta) {
+        return response()->streamDownload(function () use ($desde, $hasta, $filtros) {
             $salida = fopen('php://output', 'w');
             fwrite($salida, "\xEF\xBB\xBF");
             fputcsv($salida, array_values(self::COLUMNAS), ';');
 
-            $this->consulta($desde, $hasta)->chunk(500, function ($actividades) use ($salida) {
+            $this->consulta($desde, $hasta, $filtros)->chunk(500, function ($actividades) use ($salida) {
                 foreach ($this->filas($actividades) as $fila) {
                     fputcsv($salida, array_map(fn ($clave) => $this->textoCsv($fila[$clave]), array_keys(self::COLUMNAS)), ';');
                 }
             });
 
             // Fila de totales alineada con las columnas del presupuesto
-            $totales = $this->totales($desde, $hasta);
+            $totales = $this->totales($desde, $hasta, $filtros);
             $fila = array_fill_keys(array_keys(self::COLUMNAS), '');
             $fila['id'] = 'TOTAL';
             $fila['fecha'] = "{$totales['actividades']} actividad(es)";
@@ -107,6 +98,30 @@ class ReporteActividadService
 
             fclose($salida);
         }, $nombre, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    // Fechas obligatorias; regional y agencia opcionales. Un tipo desconocido se toma como general.
+    private function filtros(Request $request): array
+    {
+        $tipo = (string) $request->query('tipo', 'general');
+
+        return [
+            'tipo'     => in_array($tipo, self::TIPOS, true) ? $tipo : 'general',
+            'desde'    => (string) $request->query('desde', ''),
+            'hasta'    => (string) $request->query('hasta', ''),
+            'regional' => (string) $request->query('regional', ''),
+            'agencia'  => (string) $request->query('agencia', ''),
+        ];
+    }
+
+    /** Agencias activas con su regional, para los selects de filtro */
+    private function agencias(): array
+    {
+        return Agencia::query()->where('activo', 1)->whereNotNull('agenreg')->where('agenreg', '<>', '')
+            ->orderBy('agenreg')->orderBy('agennom')
+            ->get(['codagen', 'agennom', 'agenreg'])
+            ->map(fn (Agencia $a) => ['codigo' => (string) $a->codagen, 'nombre' => $a->agennom, 'regional' => (string) $a->agenreg])
+            ->all();
     }
 
     /** @return array{0: Carbon, 1: Carbon} */
@@ -135,29 +150,35 @@ class ReporteActividadService
         return [$desde, $hasta];
     }
 
-    private function consulta(Carbon $desde, Carbon $hasta): Builder
+    private function consulta(Carbon $desde, Carbon $hasta, array $filtros): Builder
     {
         return Actividad::query()
             ->from('actividades as a')
             ->join('actividad_programaciones as p', 'p.id', '=', 'a.programacion_id')
             ->select(['a.*', 'p.agencia_id', 'p.regional', 'p.coor_regional_id', 'p.responsable_id'])
             ->whereBetween('a.fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->when($filtros['regional'] !== '', fn ($q) => $q->where('p.regional', $filtros['regional']))
+            ->when($filtros['agencia'] !== '', fn ($q) => $q->where('p.agencia_id', $filtros['agencia']))
             ->orderBy('a.fecha')
             ->orderBy('a.id');
     }
 
     /** Cantidad de actividades y suma del presupuesto del checklist en el rango */
-    private function totales(Carbon $desde, Carbon $hasta): array
+    private function totales(Carbon $desde, Carbon $hasta, array $filtros): array
     {
-        $rango = [$desde->toDateString(), $hasta->toDateString()];
-        $presupuesto = DB::connection('mysql')->table('actividad_checklist as c')
-            ->join('actividades as a', 'a.id', '=', 'c.actividad_id')
-            ->whereBetween('a.fecha', $rango)
+        $base = DB::connection('mysql')->table('actividades as a')
+            ->join('actividad_programaciones as p', 'p.id', '=', 'a.programacion_id')
+            ->whereBetween('a.fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->when($filtros['regional'] !== '', fn ($q) => $q->where('p.regional', $filtros['regional']))
+            ->when($filtros['agencia'] !== '', fn ($q) => $q->where('p.agencia_id', $filtros['agencia']));
+
+        $presupuesto = (clone $base)
+            ->join('actividad_checklist as c', 'c.actividad_id', '=', 'a.id')
             ->selectRaw('coalesce(sum(c.presupuesto_asignado), 0) as asignado, coalesce(sum(c.presupuesto_autorizado), 0) as autorizado')
             ->first();
 
         return [
-            'actividades'           => DB::connection('mysql')->table('actividades')->whereBetween('fecha', $rango)->count(),
+            'actividades'           => (clone $base)->count(),
             'presupuestoAsignado'   => (float) $presupuesto->asignado,
             'presupuestoAutorizado' => (float) $presupuesto->autorizado,
         ];
@@ -204,7 +225,6 @@ class ReporteActividadService
                 'responsableEvento'     => $a->responsable_evento_id ? ($responsablesEvento[$a->responsable_evento_id] ?? $a->responsable_evento_id) : '',
                 'cedulaResponsable'     => (string) $a->responsable_evento_id,
                 'horaInicio'            => $a->hora_inicio ? substr($a->hora_inicio, 0, 5) : '',
-                'horaFin'               => $a->hora_fin ? substr($a->hora_fin, 0, 5) : '',
                 'asesores'              => $asesores->get($a->id, collect())->pluck('nombre')->implode(', '),
                 'productos'             => $productos->get($a->id, collect())->map(fn ($p) => "{$p->nombre} x{$p->cantidad}")->implode(', '),
                 'elementos'             => $elementos->map(fn ($c) => $c->nombre.($c->presupuesto_asignado !== null ? ' $'.number_format((float) $c->presupuesto_asignado, 0, ',', '.') : ''))->implode(', '),

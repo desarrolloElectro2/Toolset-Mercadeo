@@ -20,6 +20,8 @@ interface Props {
     checklist: Item[];
     error: (campo: string) => string | undefined;
     soloLectura?: boolean;
+    /** Con presupuesto autorizado el checklist no se puede cambiar aunque lo demás sí */
+    checklistBloqueado?: boolean;
 }
 
 // "NOMBRE · Vend. 1394" cuando el asesor tiene código de vendedor (asesores de Manager)
@@ -43,6 +45,7 @@ export default function DetalleActividad({
     checklist,
     error,
     soloLectura = false,
+    checklistBloqueado = false,
 }: Props) {
     const agregados = valor.productos.map((p) => p.producto);
 
@@ -172,8 +175,11 @@ export default function DetalleActividad({
                 valor={valor.checklist}
                 onChange={(lista) => onChange({ checklist: lista })}
                 error={error}
-                soloLectura={soloLectura}
+                soloLectura={soloLectura || checklistBloqueado}
             />
+            {checklistBloqueado && !soloLectura && (
+                <p className="mt-1.5 text-xs text-slate-400">El presupuesto ya fue autorizado: el checklist no se puede cambiar.</p>
+            )}
         </div>
     );
 }

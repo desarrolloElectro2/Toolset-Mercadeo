@@ -291,15 +291,16 @@ class DetalleActividadService
         $actividad->responsable_evento_id = (string) $dia['responsable_evento_id'];
     }
 
-    // Reemplaza productos, asesores y checklist de la actividad (sin llaves foráneas: se borra desde aquí)
-    public function guardarDetalles(Actividad $actividad, array $dia, array $catalogos): void
+    // Reemplaza productos, asesores y checklist de la actividad (sin llaves foráneas: se borra desde aquí).
+    // $conservarChecklist: con presupuesto ya autorizado el checklist no se toca
+    public function guardarDetalles(Actividad $actividad, array $dia, array $catalogos, bool $conservarChecklist = false): void
     {
         // El presupuesto autorizado no se digita aquí (lo pone la autorización): se conserva al reemplazar el checklist
         $autorizados = DB::connection('mysql')->table('actividad_checklist')
             ->where('actividad_id', $actividad->id)->whereNotNull('presupuesto_autorizado')
             ->pluck('presupuesto_autorizado', 'nombre')->all();
 
-        $this->eliminarDetalles($actividad);
+        $this->eliminarDetalles($actividad, $conservarChecklist);
 
         foreach ($dia['productos'] ?? [] as $item) {
             $producto = $catalogos['productos'][$item['producto']];
@@ -322,6 +323,10 @@ class DetalleActividadService
             ])->values()->all()
         );
 
+        if ($conservarChecklist) {
+            return;
+        }
+
         DB::connection('mysql')->table('actividad_checklist')->insert(
             collect($dia['checklist'] ?? [])->map(function ($item) use ($actividad, $catalogos, $autorizados) {
                 $id = isset($item['checklist_item_id']) ? (int) $item['checklist_item_id'] : null;
@@ -338,10 +343,12 @@ class DetalleActividadService
         );
     }
 
-    public function eliminarDetalles(Actividad $actividad): void
+    public function eliminarDetalles(Actividad $actividad, bool $conservarChecklist = false): void
     {
         ActividadProducto::query()->where('actividad_id', $actividad->id)->delete();
         DB::connection('mysql')->table('actividad_asesores')->where('actividad_id', $actividad->id)->delete();
-        DB::connection('mysql')->table('actividad_checklist')->where('actividad_id', $actividad->id)->delete();
+        if (! $conservarChecklist) {
+            DB::connection('mysql')->table('actividad_checklist')->where('actividad_id', $actividad->id)->delete();
+        }
     }
 }

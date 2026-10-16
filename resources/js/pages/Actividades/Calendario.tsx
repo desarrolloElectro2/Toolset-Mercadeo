@@ -23,7 +23,6 @@ interface EventoActividad {
     tipo: string;
     responsable: string;
     horaInicio: string | null;
-    horaFin: string | null;
     estado: string;
 }
 
@@ -148,9 +147,7 @@ export default function Calendario({ opciones }: Props) {
 
                 {/* Convenciones */}
                 <div className="mb-4 flex flex-wrap items-center gap-4 text-xs text-slate-600">
-                    {opciones.estados
-                        .filter((e) => e.activo)
-                        .map((e) => {
+                    {opciones.estados.map((e) => {
                             const c = colorEstado(e.color);
                             return (
                                 <span key={e.codigo} className="inline-flex items-center gap-1.5">
@@ -186,10 +183,9 @@ export default function Calendario({ opciones }: Props) {
     );
 }
 
-// Cómo se ve cada actividad: AGENCIA :: MUNICIPIO, tipo, responsable y horas (como en Correrías)
+// Cómo se ve cada actividad: AGENCIA :: MUNICIPIO, tipo, responsable y hora de inicio (como en Correrías)
 function contenidoEvento(arg: EventContentArg) {
     const a = arg.event.extendedProps as EventoActividad;
-    const horas = a.horaInicio ? `${a.horaInicio}${a.horaFin ? ` - ${a.horaFin}` : ''}` : null;
 
     return (
         <div className="w-full cursor-pointer overflow-hidden px-1 py-0.5 text-[11px] leading-tight whitespace-normal">
@@ -198,7 +194,7 @@ function contenidoEvento(arg: EventContentArg) {
             </p>
             <p>» {a.tipo}</p>
             <p>» {a.responsable}</p>
-            {horas && <p>» {horas}</p>}
+            {a.horaInicio && <p>» {a.horaInicio}</p>}
         </div>
     );
 }

@@ -53,9 +53,8 @@ export interface EstadoCatalogo {
     codigo: string;
     nombre: string;
     color: string;
-    activo: boolean;
     requiereInicio: boolean; // hora + foto de inicio
-    requiereFin: boolean; // hora fin + archivo de finalización
+    requiereFin: boolean; // archivo de finalización
     requiereObservacion: boolean; // motivo obligatorio al pasar a este estado
     permiso: string; // permiso para asignarlo
 }

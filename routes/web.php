@@ -6,9 +6,11 @@ use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\EjecucionActividadController;
 use App\Http\Controllers\EstadoActividadController;
 use App\Http\Controllers\EvidenciaActividadController;
+use App\Http\Controllers\LegalizacionActividadController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\PerfilController;
 use App\Http\Controllers\ProgramacionActividadController;
+use App\Http\Controllers\PresupuestoActividadController;
 use App\Http\Controllers\PromotoriaController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\TipoActividadController;
@@ -42,24 +44,36 @@ Route::middleware('auth')->group(function () {
         Route::put('/{actividad}', [ActividadController::class, 'update'])
             ->whereNumber('actividad')->middleware('can:act_edit')->name('update');
 
+        // Presupuesto en lote desde la lista: asignar (act_edit) y autorizar (act_autorizar)
+        Route::post('/presupuesto/asignar', [PresupuestoActividadController::class, 'asignar'])
+            ->middleware('can:act_edit')->name('presupuesto.asignar');
+        Route::post('/presupuesto/autorizar', [PresupuestoActividadController::class, 'autorizar'])
+            ->middleware('can:act_autorizar')->name('presupuesto.autorizar');
+
         // Estado Mercadeo: cambio manual de estado con sus datos (anular exige act_anular, lo demás act_edit;
         // se valida en el servicio según el estado escogido) y ver los archivos
         Route::post('/{actividad}/estado', [EjecucionActividadController::class, 'estado'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('estado');
         Route::get('/{actividad}/foto-inicio', [EjecucionActividadController::class, 'foto'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('foto');
-        Route::get('/{actividad}/foto-fin', [EjecucionActividadController::class, 'fotoFin'])
-            ->whereNumber('actividad')->middleware('can:act_list')->name('foto-fin');
         Route::get('/{actividad}/archivo-fin', [EjecucionActividadController::class, 'archivoFin'])
             ->whereNumber('actividad')->middleware('can:act_list')->name('archivo-fin');
 
-        // Evidencias del gasto y de la actividad (las carga el responsable del evento)
+        // Evidencias de la actividad: fotos del evento (las carga el responsable del evento)
         Route::post('/{actividad}/evidencias', [EvidenciaActividadController::class, 'store'])
             ->whereNumber('actividad')->middleware('can:act_edit')->name('evidencias.store');
         Route::get('/{actividad}/evidencias/{evidencia}', [EvidenciaActividadController::class, 'show'])
             ->whereNumber(['actividad', 'evidencia'])->middleware('can:act_list')->name('evidencias.show');
         Route::delete('/{actividad}/evidencias/{evidencia}', [EvidenciaActividadController::class, 'destroy'])
             ->whereNumber(['actividad', 'evidencia'])->middleware('can:act_edit')->name('evidencias.destroy');
+
+        // Legalización de gasto: conceptos, detalle y soportes con su valor (con el presupuesto autorizado)
+        Route::post('/{actividad}/legalizaciones', [LegalizacionActividadController::class, 'store'])
+            ->whereNumber('actividad')->middleware('can:act_edit')->name('legalizaciones.store');
+        Route::get('/{actividad}/legalizaciones/archivos/{archivo}', [LegalizacionActividadController::class, 'archivo'])
+            ->whereNumber(['actividad', 'archivo'])->middleware('can:act_list')->name('legalizaciones.archivo');
+        Route::delete('/{actividad}/legalizaciones/{legalizacion}', [LegalizacionActividadController::class, 'destroy'])
+            ->whereNumber(['actividad', 'legalizacion'])->middleware('can:act_edit')->name('legalizaciones.destroy');
 
         // Programación mensual
         Route::middleware('can:act_create')->group(function () {

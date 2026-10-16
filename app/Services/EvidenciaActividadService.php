@@ -12,12 +12,12 @@ use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Evidencias que carga el responsable del evento: del gasto (facturas, soportes) y de la actividad (fotos).
- * Los archivos van al disco del servidor: MERCADEO/ACTIVIDADES/{año}/{mes}/{día}/{id}/EVIDENCIA-{TIPO}-{n}_...
+ * Evidencias de la actividad (fotos del evento) que carga el responsable; el gasto va en la legalización.
+ * Los archivos van al disco del servidor: MERCADEO/ACTIVIDADES/{año}/{mes}/{día}/{id}/EVIDENCIA-{n}_...
  */
 class EvidenciaActividadService
 {
-    public const TIPOS = ['GASTO' => 'Evidencia del gasto', 'ACTIVIDAD' => 'Evidencia de la actividad'];
+    private const TITULO = 'Evidencia de la actividad';
 
     private const MODULO_ARCHIVOS = 'ACTIVIDADES';
     private const MAX_ARCHIVOS = 10;
@@ -32,12 +32,10 @@ class EvidenciaActividadService
     public function subir(Request $request, Actividad $actividad): int
     {
         $validator = Validator::make($request->all(), [
-            'tipo'       => ['required', Rule::in(array_keys(self::TIPOS))],
             'archivos'   => ['required', 'array', 'min:1', 'max:'.self::MAX_ARCHIVOS],
             'archivos.*' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
             ...MarcaFotoService::reglasUbicacion(),
         ], [
-            'tipo.required'       => 'Seleccione el tipo de evidencia.',
             'archivos.required'   => 'Seleccione al menos un archivo.',
             'archivos.max'        => 'Puede subir máximo '.self::MAX_ARCHIVOS.' archivos a la vez.',
             'archivos.*.mimes'    => 'Los archivos deben ser JPG, PNG o PDF.',
@@ -48,7 +46,6 @@ class EvidenciaActividadService
             throw new ValidationException($validator);
         }
 
-        $tipo = $request->input('tipo');
         $coduser = (string) $request->user()->coduser;
         $rutas = [];
 
@@ -57,23 +54,22 @@ class EvidenciaActividadService
             $siguiente = DB::connection('mysql')->table('actividad_evidencias')->where('actividad_id', $actividad->id)->count() + 1;
             foreach ($request->file('archivos') as $i => $archivo) {
                 // Fecha y hora de carga, ubicación y actividad escritas sobre las fotos (los PDF quedan igual)
-                $this->marcaFotoService->marcar($archivo, $request, $actividad, self::TIPOS[$tipo]);
+                $this->marcaFotoService->marcar($archivo, $request, $actividad, self::TITULO);
                 $rutas[] = [
-                    'ruta'   => $this->archivoService->guardar($archivo, self::MODULO_ARCHIVOS, $actividad->id, 'EVIDENCIA-'.$tipo.'-'.($siguiente + $i)),
+                    'ruta'   => $this->archivoService->guardar($archivo, self::MODULO_ARCHIVOS, $actividad->id, 'EVIDENCIA-'.($siguiente + $i)),
                     'nombre' => mb_substr($archivo->getClientOriginalName(), 0, 255),
                 ];
             }
 
-            DB::connection('mysql')->transaction(function () use ($actividad, $tipo, $coduser, $rutas) {
+            DB::connection('mysql')->transaction(function () use ($actividad, $coduser, $rutas) {
                 DB::connection('mysql')->table('actividad_evidencias')->insert(array_map(fn ($r) => [
                     'actividad_id'    => $actividad->id,
-                    'tipo'            => $tipo,
                     'ruta'            => $r['ruta'],
                     'nombre_original' => $r['nombre'],
                     'user_new'        => $coduser,
                 ], $rutas));
 
-                $this->historial($actividad, count($rutas).' archivo(s) de '.mb_strtolower(self::TIPOS[$tipo]).' cargado(s)', $coduser);
+                $this->historial($actividad, count($rutas).' evidencia(s) de la actividad cargada(s)', $coduser);
             });
         } catch (\Throwable $e) {
             // No se dejan archivos huérfanos en el disco

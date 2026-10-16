@@ -9,10 +9,8 @@ import { EstadoCatalogo } from '@/types/actividades';
 
 export interface DatosEjecucion {
     horaInicio: string | null;
-    horaFin: string | null;
     observaciones: string | null;
     tieneFoto: boolean;
-    tieneFotoFin: boolean;
     /** Archivo de finalización: 'imagen' (miniatura) o 'pdf' (enlace); null si no tiene */
     archivoFin: 'imagen' | 'pdf' | null;
     antesDeFecha: boolean;
@@ -47,25 +45,23 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
     const can = useCan();
     const rutaFoto = url(`/actividades/${actividadId}/foto-inicio`);
     const rutaArchivoFin = url(`/actividades/${actividadId}/archivo-fin`);
-    const rutaFotoFin = url(`/actividades/${actividadId}/foto-fin`);
     const actual = estados.find((e) => e.codigo === estado);
 
-    // Estados a los que el usuario puede pasar: activos y con el permiso que exige cada uno
-    const destinos = estados.filter((e) => e.codigo !== estado && e.activo && can(e.permiso));
+    // Estados a los que el usuario puede pasar: los que tienen el permiso que exige cada uno
+    const destinos = estados.filter((e) => e.codigo !== estado && can(e.permiso));
     const modificable = destinos.length > 0 || can('act_edit');
 
     return (
         <Seccion titulo="Estado Mercadeo">
             {/* Lo ya registrado */}
-            {(ejecucion.horaInicio || ejecucion.observaciones || ejecucion.motivoEstado) && (
+            {(ejecucion.horaInicio || ejecucion.archivoFin || ejecucion.observaciones || ejecucion.motivoEstado) && (
                 <div className="mb-5 space-y-4">
                     <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Dato etiqueta="Fecha" valor={fecha} />
                         <Dato etiqueta="Hora inicio" valor={ejecucion.horaInicio} />
-                        <Dato etiqueta="Hora fin" valor={ejecucion.horaFin} />
                     </div>
 
-                    {(ejecucion.tieneFoto || ejecucion.tieneFotoFin || ejecucion.archivoFin) && (
+                    {(ejecucion.tieneFoto || ejecucion.archivoFin) && (
                         <div className="flex flex-wrap gap-6">
                             {ejecucion.tieneFoto && (
                                 <a href={rutaFoto} target="_blank" rel="noreferrer" title="Ver foto de inicio" className="block">
@@ -73,16 +69,6 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
                                     <img
                                         src={rutaFoto}
                                         alt="Foto de inicio de la actividad"
-                                        className="h-20 w-28 rounded-lg border border-slate-200 object-cover hover:opacity-90"
-                                    />
-                                </a>
-                            )}
-                            {ejecucion.tieneFotoFin && (
-                                <a href={rutaFotoFin} target="_blank" rel="noreferrer" title="Ver foto de finalización" className="block">
-                                    <p className="mb-1 text-xs font-medium text-slate-500">Foto de finalización</p>
-                                    <img
-                                        src={rutaFotoFin}
-                                        alt="Foto de finalización de la actividad"
                                         className="h-20 w-28 rounded-lg border border-slate-200 object-cover hover:opacity-90"
                                     />
                                 </a>
@@ -141,14 +127,12 @@ interface FormEstado {
     motivo: string;
     hora_inicio: string;
     foto_inicio: File | null;
-    hora_fin: string;
-    foto_fin: File | null;
     archivo_fin: File | null;
 }
 
 /**
  * Select del estado (siempre visible) + los campos que exige el escogido según la matriz:
- * requiere inicio = hora inicio + foto; requiere fin = además hora fin + archivo; requiere observación = motivo.
+ * requiere inicio = hora inicio + foto; requiere fin = solo el archivo de soporte; requiere observación = motivo.
  * Lo que la actividad ya tiene (horas, foto, archivo) es opcional: solo se reemplaza.
  * Dejando el estado actual solo se guardan las observaciones generales.
  */
@@ -175,15 +159,9 @@ function FormularioEstado({
         motivo: '',
         hora_inicio: ejecucion.horaInicio ?? '',
         foto_inicio: null,
-        hora_fin: ejecucion.horaFin ?? '',
-        foto_fin: null,
         archivo_fin: null,
     });
-    const [vistas, setVistas] = useState<{ foto_inicio: string | null; foto_fin: string | null; archivo_fin: string | null }>({
-        foto_inicio: null,
-        foto_fin: null,
-        archivo_fin: null,
-    });
+    const [vistas, setVistas] = useState<{ foto_inicio: string | null; archivo_fin: string | null }>({ foto_inicio: null, archivo_fin: null });
 
     // Libera las URL temporales de las vistas previas
     useEffect(() => () => {
@@ -192,17 +170,20 @@ function FormularioEstado({
 
     const sinCambio = data.estado === estado;
     const destino = destinos.find((e) => e.codigo === data.estado);
-    const pideInicio = !sinCambio && !!destino?.requiereInicio;
     const pideFin = !sinCambio && !!destino?.requiereFin;
+    // Al finalizar solo se carga el archivo de soporte: no se piden los datos de inicio
+    const pideInicio = !sinCambio && !!destino?.requiereInicio && !pideFin;
     const pideMotivo = !sinCambio && !!destino?.requiereObservacion;
-    const ubicacion = useUbicacion(pideInicio);
+    // La ubicación se escribe sobre las fotos (también sobre el soporte si es imagen)
+    const conFotos = pideInicio || pideFin;
+    const ubicacion = useUbicacion(conFotos);
 
     const cambiarEstado = (nuevo: string) => {
-        setData((prev) => ({ ...prev, estado: nuevo, foto_inicio: null, foto_fin: null, archivo_fin: null }));
-        setVistas({ foto_inicio: null, foto_fin: null, archivo_fin: null });
+        setData((prev) => ({ ...prev, estado: nuevo, foto_inicio: null, archivo_fin: null }));
+        setVistas({ foto_inicio: null, archivo_fin: null });
     };
 
-    const elegirArchivo = (campo: 'foto_inicio' | 'foto_fin' | 'archivo_fin') => (e: ChangeEvent<HTMLInputElement>) => {
+    const elegirArchivo = (campo: 'foto_inicio' | 'archivo_fin') => (e: ChangeEvent<HTMLInputElement>) => {
         const archivo = e.target.files?.[0] ?? null;
         setData(campo, archivo);
         // Vista previa solo para fotos; del PDF se muestra el nombre
@@ -216,10 +197,10 @@ function FormularioEstado({
         const campos: (keyof FormEstado)[] = ['estado', 'observaciones'];
         if (pideMotivo) campos.push('motivo');
         if (pideInicio) campos.push('hora_inicio', 'foto_inicio');
-        if (pideFin) campos.push('hora_fin', 'foto_fin', 'archivo_fin');
+        if (pideFin) campos.push('archivo_fin');
 
         // Con las fotos va la ubicación del dispositivo para escribirla sobre ellas
-        transform((d) => ({ ...Object.fromEntries(campos.map((c) => [c, d[c]])), ...(pideInicio ? camposUbicacion(ubicacion) : {}) }) as unknown as FormEstado);
+        transform((d) => ({ ...Object.fromEntries(campos.map((c) => [c, d[c]])), ...(conFotos ? camposUbicacion(ubicacion) : {}) }) as unknown as FormEstado);
         post(url(`/actividades/${actividadId}/estado`), { forceFormData: true, preserveScroll: true });
     };
 
@@ -260,22 +241,6 @@ function FormularioEstado({
 
             {pideFin && (
                 <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
-                    <Campo etiqueta="Hora fin" obligatorio error={errors.hora_fin}>
-                        <input
-                            type="time"
-                            value={data.hora_fin}
-                            min={data.hora_inicio || undefined}
-                            onChange={(e) => setData('hora_fin', e.target.value)}
-                            className={inputClass}
-                        />
-                    </Campo>
-                    <Campo
-                        etiqueta={ejecucion.tieneFotoFin ? 'Reemplazar foto de finalización (opcional)' : 'Foto de finalización (JPG o PNG, máx. 5 MB)'}
-                        obligatorio={!ejecucion.tieneFotoFin}
-                        error={errors.foto_fin}
-                    >
-                        <input type="file" accept="image/jpeg,image/png" onChange={elegirArchivo('foto_fin')} className={claseArchivo} />
-                    </Campo>
                     <Campo
                         etiqueta={ejecucion.archivoFin ? 'Reemplazar soporte de finalización (opcional)' : 'Soporte de finalización (JPG, PNG o PDF, máx. 5 MB)'}
                         obligatorio={!ejecucion.archivoFin}
@@ -287,16 +252,15 @@ function FormularioEstado({
             )}
 
             {/* Ubicación que se escribirá sobre las fotos (con la fecha y hora de carga) */}
-            {pideInicio && (
+            {conFotos && (
                 <p className={`text-xs ${ubicacion.estado === 'ok' ? 'text-slate-500' : 'text-amber-700'}`}>
                     {textoUbicacion(ubicacion)} Las fotos se marcan con la fecha y hora de carga y la ubicación.
                 </p>
             )}
 
-            {(vistas.foto_inicio || vistas.foto_fin || vistas.archivo_fin || data.archivo_fin) && (
+            {(vistas.foto_inicio || vistas.archivo_fin || data.archivo_fin) && (
                 <div className="flex flex-wrap gap-4">
                     {vistas.foto_inicio && <img src={vistas.foto_inicio} alt="Vista previa de la foto de inicio" className="h-32 rounded-lg border border-slate-200 object-cover" />}
-                    {vistas.foto_fin && <img src={vistas.foto_fin} alt="Vista previa de la foto de finalización" className="h-32 rounded-lg border border-slate-200 object-cover" />}
                     {vistas.archivo_fin && <img src={vistas.archivo_fin} alt="Vista previa del archivo de finalización" className="h-32 rounded-lg border border-slate-200 object-cover" />}
                     {data.archivo_fin && !vistas.archivo_fin && (
                         <p className="inline-flex items-center gap-1.5 self-start rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">

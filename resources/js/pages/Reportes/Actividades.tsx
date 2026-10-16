@@ -1,27 +1,23 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head } from '@inertiajs/react';
 import { FormEvent, useState } from 'react';
 import Campo, { inputClass } from '@/components/Campo';
 import { IconoReporteActividades } from '@/components/Iconos';
-import Paginacion from '@/components/Paginacion';
 import AppLayout from '@/layouts/AppLayout';
 import { url } from '@/lib/url';
-import { Paginado } from '@/types';
 
-type Fila = Record<string, string | number>;
+type Tipo = 'general' | 'cumplimiento';
+type Filtros = { tipo: Tipo; desde: string; hasta: string; regional: string; agencia: string };
 
 interface Props {
-    filtros: { desde: string; hasta: string };
-    /** Clave de la fila => título de la columna (mismo orden que el CSV) */
-    columnas: Record<string, string>;
-    resultado: {
-        actividades: Paginado<Fila>;
-        totales: { actividades: number; presupuestoAsignado: number; presupuestoAutorizado: number };
-    } | null;
+    filtros: Filtros;
+    agencias: { codigo: string; nombre: string; regional: string }[];
     errors?: Record<string, string>;
 }
 
-const COLUMNAS_PESOS = ['presupuestoAsignado', 'presupuestoAutorizado'];
-const pesos = (valor: number) => `$ ${valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`;
+const AYUDA: Record<Tipo, string> = {
+    general: 'Cada actividad con su responsable, asesores, productos y presupuesto.',
+    cumplimiento: 'Programadas vs. cumplidas por regional, agencia y mes. Cumplida = en FIN ACTIVIDAD; las anuladas no cuentan: % = cumplidas ÷ (programadas − anuladas).',
+};
 
 // Primer y último día del mes actual ("YYYY-MM-DD"), para empezar con un rango útil
 function mesActual(): { desde: string; hasta: string } {
@@ -32,134 +28,90 @@ function mesActual(): { desde: string; hasta: string } {
     return { desde: `${base}-01`, hasta: `${base}-${dos(ultimo)}` };
 }
 
-export default function Actividades({ filtros, columnas, resultado, errors = {} }: Props) {
-    const [rango, setRango] = useState(filtros.desde || filtros.hasta ? filtros : mesActual());
-    const [generando, setGenerando] = useState(false);
+export default function Actividades({ filtros, agencias, errors = {} }: Props) {
+    const [valores, setValores] = useState<Filtros>(filtros.desde || filtros.hasta ? filtros : { ...filtros, ...mesActual() });
+    const [errorLocal, setErrorLocal] = useState('');
+    const [descargando, setDescargando] = useState(false);
 
+    const regionales = [...new Set(agencias.map((a) => a.regional))];
+    const agenciasRegional = agencias.filter((a) => !valores.regional || a.regional === valores.regional);
+
+    // El reporte no se muestra en pantalla: se descarga el Excel (si el servidor rechaza el rango, vuelve aquí con el error)
     const generar = (e: FormEvent) => {
         e.preventDefault();
-        router.get(url('/reportes/actividades'), rango, {
-            preserveState: true,
-            onStart: () => setGenerando(true),
-            onFinish: () => setGenerando(false),
-        });
+        if (valores.hasta < valores.desde) {
+            setErrorLocal('La fecha hasta debe ser igual o posterior a la fecha desde.');
+            return;
+        }
+        setErrorLocal('');
+        setDescargando(true);
+        window.location.assign(url(`/reportes/actividades/exportar?${new URLSearchParams({ ...valores })}`));
+        setTimeout(() => setDescargando(false), 3000);
     };
-
-    // La descarga usa el rango ya generado (el que se ve en pantalla)
-    const rutaExcel = url(`/reportes/actividades/exportar?${new URLSearchParams(filtros)}`);
 
     return (
         <AppLayout titulo="Reportes › Actividades" icono={<IconoReporteActividades />}>
             <Head title="Reporte de actividades" />
 
-            <div className="space-y-4">
-                <form onSubmit={generar} className="rounded-lg border border-slate-200 bg-white p-6">
-                    <div className="grid gap-4 sm:grid-cols-[200px_200px_auto] sm:items-end">
-                        <Campo etiqueta="Fecha desde" obligatorio error={errors.desde}>
-                            <input type="date" value={rango.desde} onChange={(e) => setRango({ ...rango, desde: e.target.value })} className={inputClass} />
-                        </Campo>
-                        <Campo etiqueta="Fecha hasta" obligatorio error={errors.hasta}>
-                            <input
-                                type="date"
-                                value={rango.hasta}
-                                min={rango.desde || undefined}
-                                onChange={(e) => setRango({ ...rango, hasta: e.target.value })}
-                                className={inputClass}
-                            />
-                        </Campo>
-                        <div className="flex flex-wrap gap-2">
-                            <button
-                                type="submit"
-                                disabled={generando || !rango.desde || !rango.hasta}
-                                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
-                            >
-                                {generando ? 'Generando…' : 'Generar reporte'}
-                            </button>
-                            {resultado && resultado.totales.actividades > 0 && (
-                                <a
-                                    href={rutaExcel}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 hover:border-green-300 hover:bg-green-100"
-                                >
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                        <path d="m7 10 5 5 5-5" />
-                                        <path d="M12 15V3" />
-                                    </svg>
-                                    Descargar Excel
-                                </a>
-                            )}
-                        </div>
+            <form onSubmit={generar} className="rounded-lg border border-slate-200 bg-white p-6">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[170px_170px_220px_160px_160px_auto] xl:items-end">
+                    <Campo etiqueta="Tipo de reporte" obligatorio>
+                        <select value={valores.tipo} onChange={(e) => setValores({ ...valores, tipo: e.target.value as Tipo })} className={inputClass}>
+                            <option value="general">General</option>
+                            <option value="cumplimiento">Cumplimiento</option>
+                        </select>
+                    </Campo>
+                    <Campo etiqueta="Regional">
+                        <select value={valores.regional} onChange={(e) => setValores({ ...valores, regional: e.target.value, agencia: '' })} className={inputClass}>
+                            <option value="">Todas</option>
+                            {regionales.map((r) => (
+                                <option key={r} value={r}>
+                                    {r}
+                                </option>
+                            ))}
+                        </select>
+                    </Campo>
+                    <Campo etiqueta="Agencia">
+                        <select value={valores.agencia} onChange={(e) => setValores({ ...valores, agencia: e.target.value })} className={inputClass}>
+                            <option value="">Todas</option>
+                            {agenciasRegional.map((a) => (
+                                <option key={a.codigo} value={a.codigo}>
+                                    {a.nombre}
+                                </option>
+                            ))}
+                        </select>
+                    </Campo>
+                    <Campo etiqueta="Fecha desde" obligatorio error={errors.desde}>
+                        <input type="date" value={valores.desde} onChange={(e) => setValores({ ...valores, desde: e.target.value })} className={inputClass} />
+                    </Campo>
+                    <Campo etiqueta="Fecha hasta" obligatorio error={errorLocal || errors.hasta}>
+                        <input
+                            type="date"
+                            value={valores.hasta}
+                            min={valores.desde || undefined}
+                            onChange={(e) => setValores({ ...valores, hasta: e.target.value })}
+                            className={inputClass}
+                        />
+                    </Campo>
+                    <div>
+                        <button
+                            type="submit"
+                            disabled={descargando || !valores.desde || !valores.hasta}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <path d="m7 10 5 5 5-5" />
+                                <path d="M12 15V3" />
+                            </svg>
+                            {descargando ? 'Generando…' : 'Generar reporte'}
+                        </button>
                     </div>
-                    <p className="mt-2 text-xs text-slate-400">Se toman las actividades cuya fecha programada está en el rango (máximo un año).</p>
-                </form>
-
-                {resultado && (
-                    <>
-                        {/* Totales del rango */}
-                        <div className="grid gap-3 sm:grid-cols-3">
-                            <Total etiqueta="Actividades" valor={String(resultado.totales.actividades)} />
-                            <Total etiqueta="Presupuesto asignado" valor={pesos(resultado.totales.presupuestoAsignado)} />
-                            <Total etiqueta="Presupuesto autorizado" valor={pesos(resultado.totales.presupuestoAutorizado)} />
-                        </div>
-
-                        <div className="rounded-lg border border-slate-200 bg-white p-6">
-                            {resultado.actividades.data.length === 0 ? (
-                                <p className="py-6 text-center text-sm text-slate-400">No hay actividades en ese rango de fechas.</p>
-                            ) : (
-                                <>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
-                                                    {Object.entries(columnas).map(([clave, titulo]) => (
-                                                        <th key={clave} className="px-2 py-2 font-medium whitespace-nowrap">
-                                                            {titulo}
-                                                        </th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {resultado.actividades.data.map((fila) => (
-                                                    <tr key={fila.id} className="border-b border-slate-100 align-top last:border-0 hover:bg-slate-50/60">
-                                                        {Object.keys(columnas).map((clave) => (
-                                                            <td
-                                                                key={clave}
-                                                                className={`px-2 py-2 text-slate-700 ${
-                                                                    COLUMNAS_PESOS.includes(clave) ? 'text-right whitespace-nowrap' : 'min-w-[90px]'
-                                                                }`}
-                                                            >
-                                                                {clave === 'id' ? (
-                                                                    <Link href={url(`/actividades/${fila.id}/editar`)} className="font-semibold text-blue-700 hover:underline">
-                                                                        {fila.id}
-                                                                    </Link>
-                                                                ) : COLUMNAS_PESOS.includes(clave) ? (
-                                                                    pesos(Number(fila[clave]))
-                                                                ) : (
-                                                                    fila[clave] || '—'
-                                                                )}
-                                                            </td>
-                                                        ))}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <Paginacion datos={resultado.actividades} />
-                                </>
-                            )}
-                        </div>
-                    </>
-                )}
-            </div>
+                </div>
+                <p className="mt-3 text-xs text-slate-400">
+                    {AYUDA[valores.tipo]} Se toman las actividades cuya fecha programada está en el rango (máximo un año). Se descarga en Excel.
+                </p>
+            </form>
         </AppLayout>
-    );
-}
-
-function Total({ etiqueta, valor }: { etiqueta: string; valor: string }) {
-    return (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-            <p className="text-xs font-medium text-slate-500">{etiqueta}</p>
-            <p className="mt-0.5 text-lg font-semibold text-slate-800">{valor}</p>
-        </div>
     );
 }

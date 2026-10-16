@@ -17,6 +17,5 @@ class ActividadEstado extends Model
         'requiere_inicio'      => 'boolean',
         'requiere_fin'         => 'boolean',
         'requiere_observacion' => 'boolean',
-        'activo'               => 'boolean',
     ];
 }

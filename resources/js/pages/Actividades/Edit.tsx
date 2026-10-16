@@ -4,6 +4,7 @@ import DetalleActividad from '@/components/actividades/DetalleActividad';
 import EjecucionActividad, { DatosEjecucion } from '@/components/actividades/EjecucionActividad';
 import EstadoActividad from '@/components/actividades/EstadoActividad';
 import EvidenciasActividad, { Evidencia } from '@/components/actividades/EvidenciasActividad';
+import LegalizacionGasto, { DatosLegalizacion } from '@/components/actividades/LegalizacionGasto';
 import ProspectosActividad, { ProspectosDelDia } from '@/components/actividades/ProspectosActividad';
 import ResponsableEvento from '@/components/actividades/ResponsableEvento';
 import PestanasActividades from '@/components/actividades/PestanasActividades';
@@ -37,6 +38,8 @@ interface Props {
     };
     ejecucion: DatosEjecucion;
     editable: boolean;
+    /** Con presupuesto autorizado el checklist queda en solo lectura */
+    presupuestoAutorizado: boolean;
     tipos: Item[];
     checklist: Item[];
     asesores: Persona[];
@@ -55,6 +58,7 @@ interface Props {
     /** Id del tipo de actividad => grupo de asesores de Manager; los demás usan toolset_perf */
     gruposAsesores: Record<string, string>;
     evidencias: Evidencia[];
+    legalizacion: DatosLegalizacion;
     /** Solo cuando la actividad está finalizada */
     prospectos: ProspectosDelDia | null;
 }
@@ -68,7 +72,7 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
     );
 }
 
-export default function Edit({ actividad, programacion, ejecucion, editable, tipos, checklist, asesores, municipios, inventario, inventarioError, historial, estados, tiposResponsable, responsablesAgencia, responsablesError, asesoresManager, asesoresManagerError, gruposAsesores, evidencias, prospectos }: Props) {
+export default function Edit({ actividad, programacion, ejecucion, editable, presupuestoAutorizado, tipos, checklist, asesores, municipios, inventario, inventarioError, historial, estados, tiposResponsable, responsablesAgencia, responsablesError, asesoresManager, asesoresManagerError, gruposAsesores, evidencias, legalizacion, prospectos }: Props) {
     const can = useCan();
     const soloLectura = !editable || !can('act_edit');
 
@@ -195,6 +199,7 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                         checklist={checklist}
                         error={(campo) => errores[campo]}
                         soloLectura={soloLectura}
+                        checklistBloqueado={presupuestoAutorizado}
                     />
                 </Seccion>
 
@@ -224,6 +229,8 @@ export default function Edit({ actividad, programacion, ejecucion, editable, tip
                 />
 
                 {prospectos && <ProspectosActividad datos={prospectos} />}
+
+                <LegalizacionGasto actividadId={actividad.id} agencia={programacion.agencia} datos={legalizacion} puedeCargar={can('act_edit')} />
 
                 <EvidenciasActividad actividadId={actividad.id} evidencias={evidencias} puedeCargar={can('act_edit')} />
 

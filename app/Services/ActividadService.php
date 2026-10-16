@@ -29,6 +29,8 @@ class ActividadService
         private EstadoActividadService $estadoService,
         private ResponsableAgenciaService $responsableService,
         private ProspectosActividadService $prospectosService,
+        private PresupuestoActividadService $presupuestoService,
+        private LegalizacionActividadService $legalizacionService,
     ) {
     }
 
@@ -126,6 +128,7 @@ class ActividadService
         $municipios = Ciudad::query()->whereIn('id', $filas->pluck('ciudad_id')->unique())->pluck('ciudad', 'id');
         $usuarios = Usuario::query()->whereIn('coduser', $filas->pluck('responsable_id')->unique())->pluck('nombre', 'coduser');
         $tipos = ActividadTipo::query()->pluck('nombre', 'id');
+        $presupuestos = $this->presupuestoService->totalesAsignados($filas->pluck('id')->all());
 
         return fn (Actividad $a) => [
             'id'          => $a->id,
@@ -136,9 +139,11 @@ class ActividadService
             'tipo'        => $tipos[$a->actividad_tipo_id] ?? '—',
             'responsable' => $usuarios[$a->responsable_id] ?? $a->responsable_id,
             'horaInicio'  => $a->hora_inicio ? substr($a->hora_inicio, 0, 5) : null,
-            'horaFin'     => $a->hora_fin ? substr($a->hora_fin, 0, 5) : null,
             'estado'      => $a->estado,
             'editable'    => $this->estadoService->esEditable($a->estado),
+            'presupuesto' => $presupuestos[$a->id] ?? 0.0, // total asignado del checklist
+            // 'asignar' / 'autorizar' si se puede seleccionar para el cambio en lote
+            'accionPresupuesto' => $this->presupuestoService->accionDisponible($a->estado, $presupuestos[$a->id] ?? 0.0),
             'creadoPor'   => $a->user_new, // código del usuario (ej. BRMC092), no el nombre
             'creadoEn'    => $a->created_at?->format('Y-m-d H:i'),
         ];
@@ -233,10 +238,8 @@ class ActividadService
             ],
             'ejecucion' => [
                 'horaInicio'     => $actividad->hora_inicio ? substr($actividad->hora_inicio, 0, 5) : null,
-                'horaFin'        => $actividad->hora_fin ? substr($actividad->hora_fin, 0, 5) : null,
                 'observaciones'  => $actividad->observaciones,
                 'tieneFoto'      => (bool) $actividad->foto_inicio,
-                'tieneFotoFin'   => (bool) $actividad->foto_fin,
                 // Archivo de finalización: foto o PDF (el PDF se muestra como enlace, no como miniatura)
                 'archivoFin'     => $actividad->archivo_fin
                     ? (str_ends_with(strtolower($actividad->archivo_fin), '.pdf') ? 'pdf' : 'imagen')
@@ -249,6 +252,8 @@ class ActividadService
                     : null,
             ],
             'editable'        => $editable,
+            // Con presupuesto autorizado el checklist queda en solo lectura
+            'presupuestoAutorizado' => $this->presupuestoService->estaAutorizado($actividad),
             'tipos'           => ActividadTipo::query()->orderBy('nombre')->get(['id', 'nombre']),
             'tiposResponsable'    => $this->responsableService->tipos(),
             'responsablesAgencia' => $responsables,
@@ -258,6 +263,7 @@ class ActividadService
                 ->where(fn ($q) => $q->where('activo', 1)->orWhereIn('id', $checklistGuardado->pluck('checklist_item_id')->filter()))
                 ->orderBy('orden')->orderBy('id')->get(['id', 'nombre']),
             'evidencias'      => $this->evidencias($actividad),
+            'legalizacion'    => $this->legalizacionService->paraVista($actividad),
             // Al finalizar: prospectos y perfilaciones que crearon ese día los asesores asignados
             'prospectos'      => $this->estadoService->porCodigo($actividad->estado)?->requiere_fin
                 ? $this->prospectosService->delDia($actividad)
@@ -287,6 +293,12 @@ class ActividadService
         }
         $datos = $validator->validated();
 
+        // Con presupuesto autorizado el checklist no se cambia: se ignora lo que llegue y se conserva el guardado
+        $conservarChecklist = $this->presupuestoService->estaAutorizado($actividad);
+        if ($conservarChecklist) {
+            $datos['checklist'] = [];
+        }
+
         $agencia = Agencia::query()->findOrFail($actividad->programacion->agencia_id);
 
         // Lo ya guardado sigue siendo válido aunque ya no tenga saldo, el asesor cambie de agencia
@@ -309,14 +321,14 @@ class ActividadService
 
         $coduser = (string) $request->user()->coduser;
 
-        DB::connection('mysql')->transaction(function () use ($actividad, $datos, $catalogos, $coduser) {
+        DB::connection('mysql')->transaction(function () use ($actividad, $datos, $catalogos, $coduser, $conservarChecklist) {
             $actividad->actividad_tipo_id = (int) $datos['actividad_tipo_id'];
             $actividad->ciudad_id         = (int) $datos['ciudad_id'];
             $this->detalleService->asignarResponsable($actividad, $datos);
             $actividad->user_update       = $coduser;
             $actividad->save();
 
-            $this->detalleService->guardarDetalles($actividad, $datos, $catalogos);
+            $this->detalleService->guardarDetalles($actividad, $datos, $catalogos, $conservarChecklist);
 
             $historial = new ActividadHistorial();
             $historial->actividad_id = $actividad->id;
@@ -343,7 +355,7 @@ class ActividadService
         return $responsables;
     }
 
-    // Evidencias del gasto y de la actividad (archivos en el disco del servidor)
+    // Evidencias de la actividad (fotos en el disco del servidor)
     private function evidencias(Actividad $actividad): array
     {
         $registros = DB::connection('mysql')->table('actividad_evidencias')->where('actividad_id', $actividad->id)->orderBy('id')->get();
@@ -351,7 +363,6 @@ class ActividadService
 
         return $registros->map(fn ($e) => [
             'id'      => (int) $e->id,
-            'tipo'    => $e->tipo,
             'nombre'  => $e->nombre_original,
             'esPdf'   => str_ends_with(strtolower($e->ruta), '.pdf'),
             'usuario' => $usuarios[$e->user_new] ?? $e->user_new,
