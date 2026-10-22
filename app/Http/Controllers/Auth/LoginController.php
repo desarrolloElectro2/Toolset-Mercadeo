@@ -36,7 +36,7 @@ class LoginController extends Controller
                 ->with('alerta', 'Ocurrió un error al iniciar sesión, por favor intente nuevamente.');
         }
 
-        return redirect()->intended(route('home'));
+        return redirect()->to($this->authService->urlTrasLogin());
     }
 
     public function logout()

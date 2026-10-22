@@ -49,6 +49,29 @@ class AuthService
         }
     }
 
+    /**
+     * URL a la que se va después del login: la página que se intentaba abrir o el inicio.
+     * La URL guardada trae la raíz que detectó la petición (en el servidor /mercadeo/public/...),
+     * así que se toma solo la ruta dentro de la app y se arma de nuevo con APP_URL.
+     */
+    public function urlTrasLogin(): string
+    {
+        $intended = Session::pull('url.intended');
+        $ruta = $intended ? (parse_url($intended, PHP_URL_PATH) ?? '/') : '/';
+
+        $base = rtrim(parse_url(config('app.url'), PHP_URL_PATH) ?? '', '/');
+        foreach ([$base.'/public', $base] as $prefijo) {
+            if ($prefijo !== '' && ($ruta === $prefijo || str_starts_with($ruta, $prefijo.'/'))) {
+                $ruta = substr($ruta, strlen($prefijo));
+                break;
+            }
+        }
+
+        $query = $intended ? parse_url($intended, PHP_URL_QUERY) : null;
+
+        return url($ruta ?: '/').($query ? '?'.$query : '');
+    }
+
     public function cerrarSesion(): void
     {
         Auth::logout();
