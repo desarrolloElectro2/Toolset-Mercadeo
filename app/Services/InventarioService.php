@@ -6,11 +6,15 @@ use App\Models\Agencia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-// Inventario por bodega desde Manager ERP (PostgreSQL, electro.vw_inventario_bod). Solo lectura.
+/**
+ * Inventario por bodega desde Manager ERP (PostgreSQL, electro.probodega). Solo lectura.
+ * probodega guarda la existencia ya calculada por producto, bodega, cuenta y lote. No se usa la vista
+ * vw_inventario_bod: suma todo el histórico de movimientos (mngmcn, sin índice por bodega) y tarda casi un minuto.
+ */
 class InventarioService
 {
     /**
-     * Productos con saldo en la bodega de la agencia (agencia.codigo_bodega = vw_inventario_bod.bodega).
+     * Productos con saldo en la bodega de la agencia (agencia.codigo_bodega = probodega.pbdbodega), en las cuentas de inventario (14).
      * Devuelve null si Manager no responde, para que la pantalla lo informe en vez de mostrar "sin productos".
      *
      * @return array<int, array{producto: string, nombre: string, referencia: ?string, saldo: int}>|null
@@ -24,12 +28,16 @@ class InventarioService
         }
 
         try {
+            // Sin trim() sobre la columna: en char la comparación ya ignora los espacios de relleno
             $filas = DB::connection('mng')
-                ->table('electro.vw_inventario_bod')
-                ->selectRaw('trim(producto) as producto, trim(pronombre) as nombre, sum(saldo) as saldo')
-                ->whereRaw('trim(bodega) = ?', [$bodega])
-                ->where('saldo', '>', 0)
-                ->groupByRaw('trim(producto), trim(pronombre)') // la vista trae una fila por lote
+                ->table('electro.probodega as pb')
+                ->join('electro.producto as p', 'p.procodigo', '=', 'pb.pbdproduct')
+                ->selectRaw('trim(pb.pbdproduct) as producto, trim(p.pronombre) as nombre, sum(pb.pbdexiste) as saldo')
+                ->where('pb.pbdbodega', $bodega)
+                ->whereBetween('pb.pbdcuenta', ['14', '14ZZ'])
+                ->where('pb.pbdproduct', '<>', '.')
+                ->where('pb.pbdexiste', '>', 0)
+                ->groupByRaw('trim(pb.pbdproduct), trim(p.pronombre)') // una fila por empresa, cuenta y lote
                 ->orderBy('nombre')
                 ->get();
         } catch (\Throwable $e) {
