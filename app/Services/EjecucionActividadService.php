@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  * Estado Mercadeo: el estado se cambia manualmente a cualquiera de la matriz
  * (Configuración › Estados actividad). Lo que exige cada uno sale de sus reglas:
  *  - requiere_inicio:      hora de inicio + foto de inicio (no antes del día programado)
- *  - requiere_fin:         solo el archivo de soporte (foto o PDF); no pide los datos de inicio
+ *  - requiere_fin:         hora de finalización + archivo de soporte (foto o PDF); no pide los datos de inicio
  *  - requiere_observacion: observación obligatoria (motivo del cambio)
  *  - permiso:              el que exige el código para cada estado (EstadoActividadService::permiso)
  *  - presupuesto:          a PRESUPUESTO ASIGNADO / AUTORIZADO con las reglas de PresupuestoActividadService;
@@ -92,9 +92,20 @@ class EjecucionActividadService
 
         $inicio = substr((string) ($cambios['hora_inicio'] ?? $actividad->hora_inicio), 0, 5);
 
-        // Al finalizar solo se carga el archivo de soporte (queda en la carpeta del día con la hora de carga)
-        if ($estado->requiere_fin && $request->hasFile('archivo_fin')) {
-            $archivos['archivo_fin'] = ['archivo' => $request->file('archivo_fin'), 'prefijo' => 'FIN', 'hora' => now()->format('H:i'), 'titulo' => 'Soporte de finalización'];
+        // Al finalizar se escoge la hora de finalización y se carga el archivo de soporte (queda en la carpeta del día con esa hora)
+        if ($estado->requiere_fin) {
+            if (! empty($datos['hora_fin'])) {
+                $cambios['hora_fin'] = $datos['hora_fin'];
+            }
+            if ($request->hasFile('archivo_fin')) {
+                $archivos['archivo_fin'] = ['archivo' => $request->file('archivo_fin'), 'prefijo' => 'FIN', 'hora' => $cambios['hora_fin'] ?? $actividad->hora_fin ?? now()->format('H:i'), 'titulo' => 'Soporte de finalización'];
+            }
+        }
+        $fin = substr((string) ($cambios['hora_fin'] ?? $actividad->hora_fin), 0, 5);
+
+        // La hora de finalización no puede ser antes de la de inicio
+        if ($estado->requiere_fin && $inicio !== '' && $fin !== '' && $fin < $inicio) {
+            throw ValidationException::withMessages(['hora_fin' => "La hora de finalización no puede ser anterior a la hora de inicio ({$inicio})."]);
         }
 
         // Al autorizar, el presupuesto asignado pasa al autorizado (en la misma transacción del cambio de estado)
@@ -102,7 +113,7 @@ class EjecucionActividadService
             ? fn () => $this->presupuestoService->copiarAutorizado($actividad)
             : null;
 
-        $this->guardar($actividad, $request, $cambios, $archivos, $this->textoHistorial($estado, $datos, $inicio), $alGuardar);
+        $this->guardar($actividad, $request, $cambios, $archivos, $this->textoHistorial($estado, $datos, $inicio, $fin), $alGuardar);
 
         return "Actividad #{$actividad->id}: estado cambiado a {$estado->nombre}.";
     }
@@ -140,24 +151,29 @@ class EjecucionActividadService
         }
 
         if ($estado->requiere_fin) {
+            $reglas['hora_fin'] = [$obligatorio($actividad->hora_fin), 'date_format:H:i'];
             $reglas['archivo_fin'] = [$obligatorio($actividad->archivo_fin), 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'];
         }
 
         return $reglas;
     }
 
-    // Al finalizar no se piden los datos de inicio: solo el archivo de soporte
+    // Al finalizar no se piden los datos de inicio: solo la hora de finalización y el archivo de soporte
     private function pideInicio(ActividadEstado $estado): bool
     {
         return $estado->requiere_inicio && ! $estado->requiere_fin;
     }
 
-    private function textoHistorial(ActividadEstado $estado, array $datos, string $inicio): string
+    private function textoHistorial(ActividadEstado $estado, array $datos, string $inicio, string $fin): string
     {
         $texto = "Cambio a {$estado->nombre}";
 
         if ($this->pideInicio($estado)) {
             $texto .= " (hora de inicio {$inicio})";
+        }
+
+        if ($estado->requiere_fin && $fin !== '') {
+            $texto .= " (hora de finalización {$fin})";
         }
 
         if (! empty($datos['motivo'])) {
@@ -222,6 +238,8 @@ class EjecucionActividadService
         $validator = Validator::make($request->all(), $reglas, [
             'hora_inicio.required'    => 'Digite la hora de inicio.',
             'hora_inicio.date_format' => 'La hora de inicio no es válida.',
+            'hora_fin.required'       => 'Escoja la hora de finalización.',
+            'hora_fin.date_format'    => 'La hora de finalización no es válida.',
             'foto_inicio.required'    => 'La foto de inicio es obligatoria.',
             'foto_inicio.image'       => 'El archivo debe ser una imagen.',
             'foto_inicio.mimes'       => 'La foto debe ser JPG o PNG.',

@@ -9,6 +9,7 @@ import { EstadoCatalogo } from '@/types/actividades';
 
 export interface DatosEjecucion {
     horaInicio: string | null;
+    horaFin: string | null;
     observaciones: string | null;
     tieneFoto: boolean;
     /** Archivo de finalización: 'imagen' (miniatura) o 'pdf' (enlace); null si no tiene */
@@ -54,11 +55,12 @@ export default function EjecucionActividad({ actividadId, estado, fecha, ejecuci
     return (
         <Seccion titulo="Estado Mercadeo">
             {/* Lo ya registrado */}
-            {(ejecucion.horaInicio || ejecucion.archivoFin || ejecucion.observaciones || ejecucion.motivoEstado) && (
+            {(ejecucion.horaInicio || ejecucion.horaFin || ejecucion.archivoFin || ejecucion.observaciones || ejecucion.motivoEstado) && (
                 <div className="mb-5 space-y-4">
                     <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
                         <Dato etiqueta="Fecha" valor={fecha} />
                         <Dato etiqueta="Hora inicio" valor={ejecucion.horaInicio} />
+                        <Dato etiqueta="Hora finalización" valor={ejecucion.horaFin} />
                     </div>
 
                     {(ejecucion.tieneFoto || ejecucion.archivoFin) && (
@@ -126,13 +128,14 @@ interface FormEstado {
     observaciones: string;
     motivo: string;
     hora_inicio: string;
+    hora_fin: string;
     foto_inicio: File | null;
     archivo_fin: File | null;
 }
 
 /**
  * Select del estado (siempre visible) + los campos que exige el escogido según la matriz:
- * requiere inicio = hora inicio + foto; requiere fin = solo el archivo de soporte; requiere observación = motivo.
+ * requiere inicio = hora inicio + foto; requiere fin = hora de finalización + archivo de soporte; requiere observación = motivo.
  * Lo que la actividad ya tiene (horas, foto, archivo) es opcional: solo se reemplaza.
  * Dejando el estado actual solo se guardan las observaciones generales.
  */
@@ -158,6 +161,7 @@ function FormularioEstado({
         observaciones: ejecucion.observaciones ?? '',
         motivo: '',
         hora_inicio: ejecucion.horaInicio ?? '',
+        hora_fin: ejecucion.horaFin ?? '',
         foto_inicio: null,
         archivo_fin: null,
     });
@@ -171,7 +175,7 @@ function FormularioEstado({
     const sinCambio = data.estado === estado;
     const destino = destinos.find((e) => e.codigo === data.estado);
     const pideFin = !sinCambio && !!destino?.requiereFin;
-    // Al finalizar solo se carga el archivo de soporte: no se piden los datos de inicio
+    // Al finalizar se piden la hora de finalización y el archivo de soporte: no se piden los datos de inicio
     const pideInicio = !sinCambio && !!destino?.requiereInicio && !pideFin;
     const pideMotivo = !sinCambio && !!destino?.requiereObservacion;
     // La ubicación se escribe sobre las fotos (también sobre el soporte si es imagen)
@@ -197,7 +201,7 @@ function FormularioEstado({
         const campos: (keyof FormEstado)[] = ['estado', 'observaciones'];
         if (pideMotivo) campos.push('motivo');
         if (pideInicio) campos.push('hora_inicio', 'foto_inicio');
-        if (pideFin) campos.push('archivo_fin');
+        if (pideFin) campos.push('hora_fin', 'archivo_fin');
 
         // Con las fotos va la ubicación del dispositivo para escribirla sobre ellas
         transform((d) => ({ ...Object.fromEntries(campos.map((c) => [c, d[c]])), ...(conFotos ? camposUbicacion(ubicacion) : {}) }) as unknown as FormEstado);
@@ -241,6 +245,15 @@ function FormularioEstado({
 
             {pideFin && (
                 <div className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
+                    <Campo etiqueta="Hora finalización" obligatorio error={errors.hora_fin}>
+                        <input
+                            type="time"
+                            value={data.hora_fin}
+                            min={ejecucion.horaInicio ?? undefined}
+                            onChange={(e) => setData('hora_fin', e.target.value)}
+                            className={inputClass}
+                        />
+                    </Campo>
                     <Campo
                         etiqueta={ejecucion.archivoFin ? 'Reemplazar soporte de finalización (opcional)' : 'Soporte de finalización (JPG, PNG o PDF, máx. 5 MB)'}
                         obligatorio={!ejecucion.archivoFin}

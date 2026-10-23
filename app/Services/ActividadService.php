@@ -37,23 +37,9 @@ class ActividadService
     // Tabla de actividades con filtros y paginación
     public function listar(Request $request): array
     {
-        $filtros = [
-            'buscar'   => trim((string) $request->query('buscar', '')),
-            'regional' => (string) $request->query('regional', ''),
-            'agencia'  => (string) $request->query('agencia', ''),
-            // Sin el parámetro se muestra el mes actual; con mes=todos no se filtra por mes
-            'mes'      => $request->has('mes') ? (string) $request->query('mes') : now()->format('Y-m'),
-            'estado'   => (string) $request->query('estado', ''),
-        ];
+        $filtros = $this->filtrosLista($request);
 
-        $actividades = $this->consultaFiltrada($filtros)
-            ->when(preg_match('/^\d{4}-\d{2}$/', $filtros['mes']) === 1, function ($q) use ($filtros) {
-                $inicio = Carbon::createFromFormat('Y-m-d', $filtros['mes'].'-01');
-                $q->whereBetween('a.fecha', [$inicio->toDateString(), $inicio->copy()->endOfMonth()->toDateString()]);
-            })
-            ->when($filtros['buscar'] !== '', fn ($q) => $this->filtrarBusqueda($q, $filtros['buscar']))
-            ->orderBy('a.fecha')
-            ->orderBy('a.id')
+        $actividades = $this->consultaLista($filtros)
             ->paginate(self::POR_PAGINA)
             ->withQueryString();
 
@@ -64,6 +50,32 @@ class ActividadService
             'filtros'     => $filtros,
             'opciones'    => $this->opcionesFiltros(),
         ];
+    }
+
+    // Filtros de la lista (también los usa el reporte de presupuesto asignado)
+    public function filtrosLista(Request $request): array
+    {
+        return [
+            'buscar'   => trim((string) $request->query('buscar', '')),
+            'regional' => (string) $request->query('regional', ''),
+            'agencia'  => (string) $request->query('agencia', ''),
+            // Sin el parámetro se muestra el mes actual; con mes=todos no se filtra por mes
+            'mes'      => $request->has('mes') ? (string) $request->query('mes') : now()->format('Y-m'),
+            'estado'   => (string) $request->query('estado', ''),
+        ];
+    }
+
+    // Consulta de la lista con todos sus filtros (mes y búsqueda incluidos), ordenada por fecha
+    public function consultaLista(array $filtros)
+    {
+        return $this->consultaFiltrada($filtros)
+            ->when(preg_match('/^\d{4}-\d{2}$/', $filtros['mes']) === 1, function ($q) use ($filtros) {
+                $inicio = Carbon::createFromFormat('Y-m-d', $filtros['mes'].'-01');
+                $q->whereBetween('a.fecha', [$inicio->toDateString(), $inicio->copy()->endOfMonth()->toDateString()]);
+            })
+            ->when($filtros['buscar'] !== '', fn ($q) => $this->filtrarBusqueda($q, $filtros['buscar']))
+            ->orderBy('a.fecha')
+            ->orderBy('a.id');
     }
 
     // Página del calendario: solo las opciones de filtros; los eventos se piden por rango (eventosCalendario)
@@ -238,6 +250,7 @@ class ActividadService
             ],
             'ejecucion' => [
                 'horaInicio'     => $actividad->hora_inicio ? substr($actividad->hora_inicio, 0, 5) : null,
+                'horaFin'        => $actividad->hora_fin ? substr($actividad->hora_fin, 0, 5) : null,
                 'observaciones'  => $actividad->observaciones,
                 'tieneFoto'      => (bool) $actividad->foto_inicio,
                 // Archivo de finalización: foto o PDF (el PDF se muestra como enlace, no como miniatura)

@@ -49,6 +49,9 @@ Route::middleware('auth')->group(function () {
             ->middleware('can:act_edit')->name('presupuesto.asignar');
         Route::post('/presupuesto/autorizar', [PresupuestoActividadController::class, 'autorizar'])
             ->middleware('can:act_autorizar')->name('presupuesto.autorizar');
+        // Reporte (CSV) de las actividades en PRESUPUESTO ASIGNADO con los filtros de la lista
+        Route::get('/presupuesto/reporte', [PresupuestoActividadController::class, 'reporte'])
+            ->middleware('can:act_list')->name('presupuesto.reporte');
 
         // Estado Mercadeo: cambio manual de estado con sus datos (anular exige act_anular, lo demás act_edit;
         // se valida en el servicio según el estado escogido) y ver los archivos

@@ -111,6 +111,13 @@ export default function Index({ actividades, filtros, opciones }: Props) {
         router.get(url('/actividades'), params, { preserveState: true, replace: true });
     };
 
+    // Descarga el CSV de las actividades en PRESUPUESTO ASIGNADO con los filtros actuales (el de estado no aplica)
+    const reportePresupuesto = () => {
+        const { estado: _estado, ...resto } = filtros;
+        const params = Object.entries(resto).filter(([clave, valor]) => valor !== '' || clave === 'mes');
+        window.location.assign(url(`/actividades/presupuesto/reporte?${new URLSearchParams(params)}`));
+    };
+
     const buscarTexto = (e: FormEvent) => {
         e.preventDefault();
         filtrar({ buscar });
@@ -180,6 +187,22 @@ export default function Index({ actividades, filtros, opciones }: Props) {
                             ))}
                         </select>
                     </div>
+                </div>
+
+                <div className="mb-3 flex justify-end">
+                    <button
+                        type="button"
+                        onClick={reportePresupuesto}
+                        title="Descargar en Excel las actividades en PRESUPUESTO ASIGNADO (con los filtros actuales) y su presupuesto por elemento"
+                        className={`${botonAccion} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50`}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <path d="M7 10l5 5 5-5" />
+                            <path d="M12 15V3" />
+                        </svg>
+                        Reporte presupuesto asignado
+                    </button>
                 </div>
 
                 {/* Cambio de presupuesto en lote */}
