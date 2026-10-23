@@ -1,3 +1,6 @@
+# La raíz de la app (/mercadeo/public/) se atiende con index.php
+DirectoryIndex index.php
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
